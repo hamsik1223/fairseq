@@ -391,11 +391,14 @@ class FlatTransformerEncoder(FairseqEncoder):
             x = self.quant_noise(x)
         ### added embed segments.
         B=src_tokens.size()[0]
-        segment_embed = torch.zeros(x.size())
-        src_tokens_1 = torch.where(src_tokens==1)[1]
-        src_tokens_3 = torch.where(src_tokens==3)[1]
+        _device = x.device
+        segment_embed = torch.zeros(x.size(), device = _device)
+        src_tokens_0 = torch.where(src_tokens==0)[1]
+        src_tokens_2 = torch.where(src_tokens==2)[1]
+        src_tokens_2 = src_tokens_2[[i*2 for i in range(src_tokens_2.size()[0]//2)]]
+        #print('embedding layer...', src_tokens_0, src_tokens_2)
         for i in range(B):
-            segment_embed[i, (1+src_tokens_1[i]): src_tokens_3[i], :] = 1
+            segment_embed[i, (1+src_tokens_0[i]): src_tokens_2[i], :] = 1
         x = x + segment_embed
         return x, embed
 
@@ -436,25 +439,36 @@ class FlatTransformerEncoder(FairseqEncoder):
 
         # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
-
+        #print('printing src_tokens\' padding mask...', encoder_padding_mask)
+        
         encoder_states = [] if return_all_hiddens else None
 
         # encoder layers. for bottom layers
-        for layer in self.bot_layers:
+        for bot_layer in range(self.bot_layers):
+            layer = self.layers[bot_layer]
             x = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
         # mask the context sentences 
         ###based on the src_tokens, produce the source sentence's indexes
+        _device = x.device
         B=src_tokens.size()[0]
-        encoder_padding_mask = torch.zeros(src_tokens.size())
-        src_tokens_1 = torch.where(src_tokens==1)[1]
-        src_tokens_3 = torch.where(src_tokens==3)[1]
+        encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
+        src_tokens_0 = torch.where(src_tokens==0)[1]
+        src_tokens_2 = torch.where(src_tokens==2)[1]
+        src_tokens_2 = src_tokens_2[[i*2 for i in range(src_tokens_2.size()[0]//2)]]
+        #print(torch.where(src_tokens==0), torch.where(src_tokens==2))
+        #print(src_tokens_0, src_tokens_2)
         for i in range(B):
-            encoder_padding_mask[i, (1+src_tokens_1[i]): src_tokens_3[i]] = 1
+            encoder_padding_mask[i, (1+src_tokens_0[i]): src_tokens_2[i]] = 1
+        encoder_padding_mask = encoder_padding_mask < 0.5
+        #print('printing encoder_padding_mask...', encoder_padding_mask)
+        #print('printing sum...', encoder_padding_mask.sum(1))
+        #print(torch.where(src_tokens==3)[1][0])
         # encoder layers, for top layers
-        for layer in self.top_layers:
+        for top_layer in range(self.top_layers):
+            layer = self.layers[self.bot_layers + top_layer]
             x = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
