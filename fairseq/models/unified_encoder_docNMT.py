@@ -376,8 +376,8 @@ class FlatTransformerEncoder(FairseqEncoder):
         #so the first one is the start (src_tokens_0), 
         #the second one is the end (src_tokens_2)
         src_tokens_seperate_index = torch.where(src_tokens==0)[1]
-        src_tokens_2 = src_tokens_0[[i*2+1 for i in range(src_tokens_seperate_index.size()[0]//2)]]
-        src_tokens_0 = src_tokens_0[[i*2 for i in range(src_tokens_seperate_index.size()[0]//2)]]
+        src_tokens_2 = src_tokens_seperate_index[[i*2+1 for i in range(src_tokens_seperate_index.size()[0]//2)]]
+        src_tokens_0 = src_tokens_seperate_index[[i*2 for i in range(src_tokens_seperate_index.size()[0]//2)]]
         return src_tokens_0, src_tokens_2
 
     ###new 
