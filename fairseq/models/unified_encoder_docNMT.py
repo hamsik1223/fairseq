@@ -371,14 +371,13 @@ class FlatTransformerEncoder(FairseqEncoder):
 
     ###new
     def find_split_of_source_and_context(self, src_tokens):
-        #looking for <s> in the input instance
-        #there are 2 <s> in every instance, 
-        #so the first one is the start (src_tokens_0), 
-        #the second one is the end (src_tokens_2)
-        src_tokens_seperate_index = torch.where(src_tokens==0)[1]
-        src_tokens_2 = src_tokens_seperate_index[[i*2+1 for i in range(src_tokens_seperate_index.size()[0]//2)]]
-        src_tokens_0 = src_tokens_seperate_index[[i*2 for i in range(src_tokens_seperate_index.size()[0]//2)]]
-        return src_tokens_0, src_tokens_2
+        #looking for split index of the source in the input instance
+        #there is 1 <s> as the start (src_tokens_0), 
+        #and the </s> after that <s> is the end 
+        src_tokens_start = torch.where(src_tokens==0)[1]
+        print(src_tokens_start)
+        print(torch.where(src_tokens==2))
+        return src_tokens_start
 
     ###new 
     def build_source_sentence_mask(self, src_tokens):
@@ -406,11 +405,6 @@ class FlatTransformerEncoder(FairseqEncoder):
         x = embed = self.embed_scale * token_embedding
         if self.embed_positions is not None:
             x = embed + self.embed_positions(src_tokens)
-        if self.layernorm_embedding is not None:
-            x = self.layernorm_embedding(x)
-        x = self.dropout_module(x)
-        if self.quant_noise is not None:
-            x = self.quant_noise(x)
         ###new added embed segments.
         B=src_tokens.size()[0]
         _device = x.device
@@ -420,6 +414,12 @@ class FlatTransformerEncoder(FairseqEncoder):
         for i in range(B):
             segment_embed[i, (1+src_tokens_0[i]): (1+src_tokens_2[i]), :] = 1
         x = x + segment_embed
+        ###
+        if self.layernorm_embedding is not None:
+            x = self.layernorm_embedding(x)
+        x = self.dropout_module(x)
+        if self.quant_noise is not None:
+            x = self.quant_noise(x)
         return x, embed
 
     def forward(
