@@ -374,19 +374,29 @@ class FlatTransformerEncoder(FairseqEncoder):
         #looking for split index of the source in the input instance
         #there is 1 <s> as the start (src_tokens_0), 
         #and the </s> after that <s> is the end 
+        B=src_tokens.size()[0]
         src_tokens_start = torch.where(src_tokens==0)[1]
-        print(src_tokens_start)
-        print(torch.where(src_tokens==2))
-        return src_tokens_start
+        src_tokens_end_tuple = torch.where(src_tokens==2) 
+        src_tokens_end_sen_index = src_tokens_end_tuple[0]
+        src_tokens_end_index = src_tokens_end_tuple[1]
+        src_tokens_end = torch.zeros(src_tokens_start.size())
+        for i in range(B):
+            src_tokens_end_cur = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
+            src_tokens_end[i] = src_tokens_end_cur[torch.where(src_tokens_end_cur > src_tokens_start[i])[0][0]]
+        #print(src_tokens_start, src_tokens_end)
+        #for i in range(B):
+        #    print(src_tokens_start[i], src_tokens_end[i], src_tokens[i,:])
+        #print(0[0])
+        return src_tokens_start, src_tokens_end.int()
 
     ###new 
-    def build_source_sentence_mask(self, src_tokens):
+    def build_source_sentence_mask(self, src_tokens, src_tokens_start, src_tokens_end):
         _device = src_tokens.device
         B=src_tokens.size()[0]
         encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
-        src_tokens_0, src_tokens_2 = self.find_split_of_source_and_context(src_tokens)
+        #src_tokens_start, src_tokens_end = self.find_split_of_source_and_context(src_tokens)
         for i in range(B):
-            encoder_padding_mask[i, (1+src_tokens_0[i]): src_tokens_2[i]] = 1
+            encoder_padding_mask[i, (1+src_tokens_start[i]): src_tokens_end[i]] = 1
         encoder_padding_mask = encoder_padding_mask < 0.5
         return encoder_padding_mask
 
@@ -409,10 +419,9 @@ class FlatTransformerEncoder(FairseqEncoder):
         B=src_tokens.size()[0]
         _device = x.device
         segment_embed = torch.zeros(x.size(), device = _device)
-        src_tokens_0, src_tokens_2 = self.find_split_of_source_and_context(src_tokens)      
-        #print('embedding layer...', src_tokens_0, src_tokens_2)
+        src_tokens_start, src_tokens_end = self.find_split_of_source_and_context(src_tokens)      
         for i in range(B):
-            segment_embed[i, (1+src_tokens_0[i]): (1+src_tokens_2[i]), :] = 1
+            segment_embed[i, (1+src_tokens_start[i]): (1+src_tokens_end[i]), :] = 1
         x = x + segment_embed
         ###
         if self.layernorm_embedding is not None:
@@ -420,7 +429,7 @@ class FlatTransformerEncoder(FairseqEncoder):
         x = self.dropout_module(x)
         if self.quant_noise is not None:
             x = self.quant_noise(x)
-        return x, embed
+        return x, embed, src_tokens_start, src_tokens_end
 
     def forward(
         self,
@@ -452,7 +461,7 @@ class FlatTransformerEncoder(FairseqEncoder):
                   hidden states of shape `(src_len, batch, embed_dim)`.
                   Only populated if *return_all_hiddens* is True.
         """
-        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+        x, encoder_embedding, src_tokens_start, src_tokens_end = self.forward_embedding(src_tokens, token_embeddings)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -474,7 +483,7 @@ class FlatTransformerEncoder(FairseqEncoder):
                 encoder_states.append(x)
         # mask the context sentences 
         ###based on the src_tokens, produce the source sentence's indexes
-        encoder_padding_mask = self.build_source_sentence_mask(src_tokens)
+        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
         # encoder layers, for top layers
         for top_layer in range(self.top_layers):
             layer = self.layers[self.bot_layers + top_layer]
