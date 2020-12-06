@@ -396,7 +396,7 @@ class FlatTransformerEncoder(FairseqEncoder):
         encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
         #src_tokens_start, src_tokens_end = self.find_split_of_source_and_context(src_tokens)
         for i in range(B):
-            encoder_padding_mask[i, (1+src_tokens_start[i]): src_tokens_end[i]] = 1
+            encoder_padding_mask[i, (1+src_tokens_start[i]): (1+src_tokens_end[i])] = 1
         encoder_padding_mask = encoder_padding_mask < 0.5
         return encoder_padding_mask
 
