@@ -1,3 +1,6 @@
+###unfied encoder based on the paper 
+###A Simple and Effective Unified Encoder for Document-Level Machine Translation
+###on https://www.aclweb.org/anthology/2020.acl-main.321.pdf
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
