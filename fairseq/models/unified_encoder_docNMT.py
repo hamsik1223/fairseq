@@ -340,7 +340,19 @@ class FlatTransformerEncoder(FairseqEncoder):
                 self.padding_idx,
                 learned=args.encoder_learned_pos,
             )
+            #if not True
             if not args.no_token_positional_embeddings
+            else None
+        )
+        ###
+        self.embed_sentence_positions = (
+            PositionalEmbedding(
+                args.max_source_positions,
+                embed_dim,
+                padding_idx=None,
+                learned=True,
+            )
+            if not False
             else None
         )
 
@@ -375,7 +387,7 @@ class FlatTransformerEncoder(FairseqEncoder):
     ###new
     def find_split_of_source_and_context(self, src_tokens):
         #looking for split index of the source in the input instance
-        #there is 1 <s> as the start (src_tokens_0), 
+        #there is only one <s> as the start (src_tokens_0), 
         #and the </s> after that <s> is the end 
         B=src_tokens.size()[0]
         src_tokens_start = torch.where(src_tokens==0)[1]
@@ -386,22 +398,50 @@ class FlatTransformerEncoder(FairseqEncoder):
         for i in range(B):
             src_tokens_end_cur = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
             src_tokens_end[i] = src_tokens_end_cur[torch.where(src_tokens_end_cur > src_tokens_start[i])[0][0]]
-        #print(src_tokens_start, src_tokens_end)
-        #for i in range(B):
-        #    print(src_tokens_start[i], src_tokens_end[i], src_tokens[i,:])
-        #print(0[0])
-        return src_tokens_start, src_tokens_end.int()
+        return src_tokens_start, src_tokens_end.int(), src_tokens_end_tuple
 
     ###new 
     def build_source_sentence_mask(self, src_tokens, src_tokens_start, src_tokens_end):
         _device = src_tokens.device
         B=src_tokens.size()[0]
         encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
-        #src_tokens_start, src_tokens_end = self.find_split_of_source_and_context(src_tokens)
         for i in range(B):
             encoder_padding_mask[i, (1+src_tokens_start[i]): (1+src_tokens_end[i])] = 1
         encoder_padding_mask = encoder_padding_mask < 0.5
         return encoder_padding_mask
+
+    ###
+    def convert_to_sentence_emb(self, src_tokens, end_tag = 2, start_tag = 0):
+        '''
+        convert the src_token index to src_token_sentencelevel,
+        which are sentence indexes, based on end_tag and start tag
+        --current sentence is indexed as 0, 
+        --after sentences i are indexs as i*2 + padding_idx + 1
+        --previous sentences i is indexed as i*2-1 + padding_idx + 1
+        e.g. [23, 2, 0, 4, 2, 5, 2] --> [3, 3, 2, 2, 2, 4, 4]
+        '''
+        src_tokens_start, src_tokens_end, src_tokens_end_tuple = self.find_split_of_source_and_context(src_tokens)
+        src_tokens_end_sen_index = src_tokens_end_tuple[0]
+        src_tokens_end_index = src_tokens_end_tuple[1]
+        _device = src_tokens.device
+        B=src_tokens.size()[0]
+        src_tokens_sentence_level = torch.zeros(src_tokens.size(), device = _device)
+        for i in range(B):
+            src_tokens_end_cur = src_tokens_end[i]
+            src_tokens_end_cur_arr = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
+            src_tokens_end_index_before = src_tokens_end_cur_arr[torch.where(src_tokens_end_cur_arr<src_tokens_end_cur)]
+            src_tokens_end_index_before = torch.flip(src_tokens_end_index_before, [0]).tolist() + [-1]
+            src_tokens_end_index_after = [src_tokens_end_cur.tolist()] + src_tokens_end_cur_arr[torch.where(src_tokens_end_cur_arr>src_tokens_end_cur)].tolist()
+
+            if len(src_tokens_end_index_before) > 1:
+                for j, index in enumerate(src_tokens_end_index_before[:-1]):
+                    src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = j * 2 + 1
+            if len(src_tokens_end_index_after) > 1:
+                for j, index in enumerate(src_tokens_end_index_after[:-1]):
+                    src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j * 2 + 2
+            src_tokens_sentence_level[i, torch.where(src_tokens[i, ]==self.padding_idx)[0]] = self.padding_idx
+            src_tokens_sentence_level[i, torch.where(src_tokens[i, ]!=self.padding_idx)[0]] += self.padding_idx + 1
+        return src_tokens_sentence_level.int().long()
 
     def build_encoder_layer(self, args):
         layer = TransformerEncoderLayer(args)
@@ -419,13 +459,18 @@ class FlatTransformerEncoder(FairseqEncoder):
         if self.embed_positions is not None:
             x = embed + self.embed_positions(src_tokens)
         ###new added embed segments.
-        B=src_tokens.size()[0]
-        _device = x.device
-        segment_embed = torch.zeros(x.size(), device = _device)
-        src_tokens_start, src_tokens_end = self.find_split_of_source_and_context(src_tokens)      
-        for i in range(B):
-            segment_embed[i, (1+src_tokens_start[i]): (1+src_tokens_end[i]), :] = 1
-        x = x + segment_embed
+        src_tokens_start, src_tokens_end, _ = self.find_split_of_source_and_context(src_tokens)      
+        sen_emb_method = 'bysegment'
+        if sen_emb_method == 'bysegment':
+            B=src_tokens.size()[0]
+            _device = x.device
+            segment_embed = torch.zeros(x.size(), device = _device)
+            for i in range(B):
+                segment_embed[i, (1+src_tokens_start[i]): (1+src_tokens_end[i]), :] = 1
+            x = x + segment_embed
+        else:
+            src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
+            x = x + self.embed_sentence_positions(src_tokens, positions = src_tokens_sentence_level)
         ###
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
