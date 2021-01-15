@@ -415,14 +415,20 @@ class FlatTransformerEncoder(FairseqEncoder):
         return encoder_padding_mask
 
     ###
-    def convert_to_sentence_emb(self, src_tokens, end_tag = 2, start_tag = 0):
+    def convert_to_sentence_emb(self, src_tokens, mode = 'relative',end_tag = 2, start_tag = 0):
         '''
         convert the src_token index to src_token_sentencelevel,
         which are sentence indexes, based on end_tag and start tag
-        --current sentence is indexed as 0, 
-        --after sentences i are indexs as i*2 + padding_idx + 1
-        --previous sentences i is indexed as i*2-1 + padding_idx + 1
-        e.g. [23, 2, 0, 4, 2, 5, 2] --> [3, 3, 2, 2, 2, 4, 4]
+        if mode is absolute, convert it into 
+            --current sentence is indexed as 0, 
+            --after sentences i are indexs as i*2 + padding_idx + 1
+            --previous sentences i is indexed as i*2-1 + padding_idx + 1
+            e.g. [23, 2, 0, 4, 2, 5, 2] --> [3, 3, 2, 2, 2, 4, 4]
+        if mode is relative, convert it into 
+            --current sentence --> 0 
+            --after sentence i --> i
+            --previous sentence i --> -i
+            e.g. [23, 2, 0, 4, 2, 5, 2] --> [-1, -1, 0, 0, 0, 1, 1]
         '''
         src_tokens_start, src_tokens_end, src_tokens_end_tuple = self.find_split_of_source_and_context(src_tokens)
         src_tokens_end_sen_index = src_tokens_end_tuple[0]
@@ -439,12 +445,16 @@ class FlatTransformerEncoder(FairseqEncoder):
 
             if len(src_tokens_end_index_before) > 1:
                 for j, index in enumerate(src_tokens_end_index_before[:-1]):
-                    src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = j * 2 + 1
+                    if mode=='relative':
+                        src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = -(j+1)
+                    elif mode=='absolute':
+                        src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = j * 2 + 1
             if len(src_tokens_end_index_after) > 1:
                 for j, index in enumerate(src_tokens_end_index_after[:-1]):
-                    src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j * 2 + 2
-            src_tokens_sentence_level[i, torch.where(src_tokens[i, ]==self.padding_idx)[0]] = self.padding_idx
-            src_tokens_sentence_level[i, torch.where(src_tokens[i, ]!=self.padding_idx)[0]] += self.padding_idx + 1
+                    if mode=='relative':
+                        src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j+1             
+                    elif mode=='absolute':   
+                        src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j * 2 + 2
         return src_tokens_sentence_level.int().long()
 
     def build_encoder_layer(self, args):
@@ -505,7 +515,8 @@ class FlatTransformerEncoder(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         x, encoder_embedding, src_tokens_start, src_tokens_end  = self.forward_embedding(src_tokens)
-
+        src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
+        
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -519,24 +530,25 @@ class FlatTransformerEncoder(FairseqEncoder):
         # encoder layers. for bottom layers
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
-            x = layer(x, encoder_padding_mask)
-            if return_all_hiddens:
+            x = layer(x, encoder_padding_mask, sentence_position = src_tokens_sentence_level)
+            if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x)
         # mask the context sentences 
         ###based on the src_tokens, produce the source sentence's indexes
-        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
+        if not args.use_relative_pos_embeddings:
+            encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
         # encoder layers, for top layers
         for top_layer in range(self.top_layers):
             layer = self.layers[self.bot_layers + top_layer]
-            x = layer(x, encoder_padding_mask)
+            x = layer(x, encoder_padding_mask, sentence_position = src_tokens_sentence_level)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
-
+        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)       
         return EncoderOut(
             encoder_out=x,  # T x B x C
             encoder_padding_mask=encoder_padding_mask,  # B x T
@@ -996,7 +1008,7 @@ def Linear(in_features, out_features, bias=True):
 
 
 @register_model_architecture("flat_transformer", "flat_transformer")
-def base_architecture(args):
+def flat_transformer(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
@@ -1049,3 +1061,8 @@ def base_architecture(args):
     args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
     args.quant_noise_pq_block_size = getattr(args, "quant_noise_pq_block_size", 8)
     args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
+
+@register_model_architecture("flat_transformer", "flat_transformer_rel_senpos_embeddings")
+def flat_transformer_rel_senpos_embeddings(args):
+    args.use_relative_pos_embeddings = getattr(args, "use_relative_pos_embeddings", True)
+    flat_transformer(args)

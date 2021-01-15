@@ -90,7 +90,9 @@ class TransformerEncoderLayer(nn.Module):
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
 
-    def forward(self, x, encoder_padding_mask, attn_mask: Optional[Tensor] = None):
+    def forward(self, x, encoder_padding_mask, attn_mask: Optional[Tensor] = None, 
+                sentence_position = None):
+                ###
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -126,7 +128,9 @@ class TransformerEncoderLayer(nn.Module):
             key_padding_mask=encoder_padding_mask,
             need_weights=False,
             attn_mask=attn_mask,
+            sentence_position = sentence_position
         )
+        ###
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         if not self.normalize_before:
@@ -230,9 +234,10 @@ class TransformerDecoderLayer(nn.Module):
             self_attention=not getattr(args, "cross_self_attention", False),
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            relative_pos_type=("masked"
-                               if getattr(args, "use_relative_pos_embeddings", False)
-                               else None),
+            # relative_pos_type=("masked"
+            #                    if getattr(args, "use_relative_pos_embeddings", False)
+            #                    else None),
+            relative_pos_type = None, ### 
             max_relative_pos=getattr(args, "max_relative_pos", 128),
             heads_share_embeddings=getattr(args, "heads_share_embeddings", False),
             add_pos_embeddings_to_values=getattr(args, "add_pos_embeddings_to_values", False)

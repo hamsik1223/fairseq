@@ -137,7 +137,9 @@ class MultiheadAttention(nn.Module):
         attn_mask: Optional[Tensor] = None,
         before_softmax: bool = False,
         need_head_weights: bool = False,
+        sentence_position: Optional[Tensor] = None
     ) -> Tuple[Tensor, Optional[Tensor]]:
+    ###sentence_position
         """Input shape: Time x Batch x Channel
 
         Args:
@@ -182,8 +184,8 @@ class MultiheadAttention(nn.Module):
                 saved_state = None
                 if incremental_state is not None:
                     saved_state = self._get_input_buffer(incremental_state)
-
-                positional_logits, _ = self.positional_embedding_layer(q, saved_state)
+                ###
+                positional_logits, _ = self.positional_embedding_layer(q, saved_state, sentence_position_index = sentence_position)
 
                 if attn_mask is not None:
                     # The mask is added to "attention logits" before
@@ -269,7 +271,8 @@ class MultiheadAttention(nn.Module):
 
         if self.positional_embedding_layer is not None:
             q = q.view(q.shape[0], -1, self.head_dim)
-            positional_logits, values_embeddings = self.positional_embedding_layer(q, saved_state)
+            ###
+            positional_logits, values_embeddings = self.positional_embedding_layer(q, saved_state, sentence_position_index=sentence_position)
             if attn_mask is not None:
                 # The mask is added to "attention logits" before
                 # softmax, and originally contains -inf to mask positions

@@ -108,8 +108,8 @@ class LearnedRelativePositionalEmbedding(nn.Module):
         initial_stddev = embedding_dim**(-0.5)
         self.embeddings = nn.Parameter(torch.zeros(*embedding_size))
         nn.init.normal_(self.embeddings, mean=0.0, std=initial_stddev)
-
-    def forward(self, query, saved_state=None):
+    ###
+    def forward(self, query, saved_state=None, sentence_position_index = None):
         """
         Computes relative positional embeddings to be added to keys (and optionally values),
         multiplies the embeddings for keys with queries to create positional logits,
@@ -146,7 +146,11 @@ class LearnedRelativePositionalEmbedding(nn.Module):
             else None
         )
         positional_logits = self.calculate_positional_logits(query, used_embeddings[..., 0])
-        positional_logits = self.relative_to_absolute_indexing(positional_logits, decoder_step)
+        ###
+        if sentence_position_index is None:
+            positional_logits = self.relative_to_absolute_indexing(positional_logits, decoder_step)
+        else:
+            positional_logits = self.relative_to_sentence_indexing(positional_logits, sentence_position_index)
         return (positional_logits, values_embeddings)
 
     def get_embeddings_for_query(self, length):
@@ -256,3 +260,22 @@ class LearnedRelativePositionalEmbedding(nn.Module):
             x = x.transpose(0, 1)
             x = x.contiguous().view(bsz_heads, length+1, length)
             return x[:, 1:, :]
+    ###
+    def relative_to_sentence_indexing(self, x, sentence_position_index):
+        '''
+        given the sentence positional index tensor, output the relative bias term
+        '''
+        #x = positional_logits
+        length, bsz_heads, _ = x.shape
+        batch_size = int(bsz_heads / self.num_heads) 
+        x = x.view(length, batch_size, self.num_heads, -1)
+        ### (length, batch_size, num_heads, 2*length-1)
+
+        sentence_position_index_matrix = sentence_position_index.view(1, batch_size,length).repeat([length,1,1])
+        sentence_position_index_matrix = sentence_position_index_matrix - sentence_position_index_matrix.transpose(0,2)  + length -1 
+        ###(length, batch_size, length)
+        sentence_position_index_matrix = sentence_position_index_matrix.view(length, batch_size, 1, length).repeat([1,1,num_heads,1])
+        ###(length, batch_size, num_heads, length)
+        tmp_x = torch.gather(x, 3, sentence_position_index_matrix)
+        res = tmp_x.transpose(0,1).transpose(1,2).view(bsz_heads, length,length)
+        return res
