@@ -2,14 +2,17 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 from fairseq import utils
-from fairseq.modules import LayerNorm, MultiheadAttention
-from fairseq.modules.fairseq_dropout import FairseqDropout
+from fairseq.modules import (
+    LayerNorm,
+    MultiheadAttention,
+)
 from fairseq.modules.quant_noise import quant_noise
 
 
@@ -27,25 +30,17 @@ class TransformerSentenceEncoderLayer(nn.Module):
         dropout: float = 0.1,
         attention_dropout: float = 0.1,
         activation_dropout: float = 0.1,
-        activation_fn: str = "relu",
+        activation_fn: str = 'relu',
         export: bool = False,
         q_noise: float = 0.0,
         qn_block_size: int = 8,
-        init_fn: Callable = None,
     ) -> None:
+
         super().__init__()
-
-        if init_fn is not None:
-            init_fn()
-
         # Initialize parameters
         self.embedding_dim = embedding_dim
-        self.dropout_module = FairseqDropout(
-            dropout, module_name=self.__class__.__name__
-        )
-        self.activation_dropout_module = FairseqDropout(
-            activation_dropout, module_name=self.__class__.__name__
-        )
+        self.dropout = dropout
+        self.activation_dropout = activation_dropout
 
         # Initialize blocks
         self.activation_fn = utils.get_activation_fn(activation_fn)
@@ -78,10 +73,14 @@ class TransformerSentenceEncoderLayer(nn.Module):
         self.final_layer_norm = LayerNorm(self.embedding_dim, export=export)
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
-        return quant_noise(nn.Linear(input_dim, output_dim), q_noise, qn_block_size)
+        return quant_noise(
+            nn.Linear(input_dim, output_dim), q_noise, qn_block_size
+        )
 
     def build_fc2(self, input_dim, output_dim, q_noise, qn_block_size):
-        return quant_noise(nn.Linear(input_dim, output_dim), q_noise, qn_block_size)
+        return quant_noise(
+            nn.Linear(input_dim, output_dim), q_noise, qn_block_size
+        )
 
     def build_self_attention(
         self,
@@ -120,15 +119,15 @@ class TransformerSentenceEncoderLayer(nn.Module):
             need_weights=False,
             attn_mask=self_attn_mask,
         )
-        x = self.dropout_module(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.self_attn_layer_norm(x)
 
         residual = x
         x = self.activation_fn(self.fc1(x))
-        x = self.activation_dropout_module(x)
+        x = F.dropout(x, p=self.activation_dropout, training=self.training)
         x = self.fc2(x)
-        x = self.dropout_module(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.final_layer_norm(x)
         return x, attn

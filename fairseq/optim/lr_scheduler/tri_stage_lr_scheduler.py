@@ -3,13 +3,12 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from . import FairseqLRScheduler, register_lr_scheduler
 import math
 
-from . import LegacyFairseqLRScheduler, register_lr_scheduler
 
-
-@register_lr_scheduler("tri_stage")
-class TriStageLRSchedule(LegacyFairseqLRScheduler):
+@register_lr_scheduler('tri_stage')
+class TriStageLRSchedule(FairseqLRScheduler):
     """Tristage learning rate schedulr
 
     Implement the learning rate scheduler in https://arxiv.org/pdf/1904.08779.pdf
@@ -51,8 +50,8 @@ class TriStageLRSchedule(LegacyFairseqLRScheduler):
         super().__init__(args, optimizer)
         if len(args.lr) > 1:
             raise ValueError(
-                "Cannot use a fixed learning rate schedule with tri-stage lr."
-                " Consider --lr-scheduler=fixed instead."
+                'Cannot use a fixed learning rate schedule with tri-stage lr.'
+                ' Consider --lr-scheduler=fixed instead.'
             )
 
         # calculate LR at each point
@@ -65,11 +64,7 @@ class TriStageLRSchedule(LegacyFairseqLRScheduler):
         self.hold_steps = args.hold_steps
         self.decay_steps = args.decay_steps
 
-        self.warmup_rate = (
-            (self.peak_lr - self.init_lr) / self.warmup_steps
-            if self.warmup_steps != 0
-            else 0
-        )
+        self.warmup_rate = (self.peak_lr - self.init_lr) / self.warmup_steps
         self.decay_factor = -math.log(args.final_lr_scale) / args.decay_steps
 
         # initial learning rate

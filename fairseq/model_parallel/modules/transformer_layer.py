@@ -3,16 +3,18 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from fairseq.model_parallel.modules import ModelParallelMultiheadAttention
-from fairseq.modules import TransformerDecoderLayer, TransformerEncoderLayer
+from fairseq.modules import (
+    TransformerEncoderLayer,
+    TransformerDecoderLayer,
+)
 
+from fairseq.model_parallel.modules import ModelParallelMultiheadAttention
 
 try:
     from fairseq.model_parallel.megatron.mpu import (
         ColumnParallelLinear,
         RowParallelLinear,
     )
-
     has_megatron_submodule = True
 except (ImportError, ModuleNotFoundError):
     has_megatron_submodule = False
@@ -21,7 +23,7 @@ except (ImportError, ModuleNotFoundError):
 class ModelParallelTransformerEncoderLayer(TransformerEncoderLayer):
     """Encoder layer block over multiple gpus.
 
-    See "Megatron-LM: https://arxiv.org/pdf/1909.08053.pdf" for more details.
+        See "Megatron-LM: https://arxiv.org/pdf/1909.08053.pdf" for more details.
     """
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
@@ -46,9 +48,8 @@ class ModelParallelTransformerEncoderLayer(TransformerEncoderLayer):
 class ModelParallelTransformerDecoderLayer(TransformerDecoderLayer):
     """Decoder layer block.
 
-    See "Megatron-LM: https://arxiv.org/pdf/1909.08053.pdf" for more details.
+        See "Megatron-LM: https://arxiv.org/pdf/1909.08053.pdf" for more details.
     """
-
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
         if q_noise > 0:
             raise NotImplementedError

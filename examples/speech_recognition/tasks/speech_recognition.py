@@ -6,13 +6,12 @@
 import json
 import os
 import re
-import sys
 
 import torch
+from fairseq.data import Dictionary
+from fairseq.tasks import FairseqTask, register_task
 from examples.speech_recognition.data import AsrDataset
 from examples.speech_recognition.data.replabels import replabel_symbol
-from fairseq.data import Dictionary
-from fairseq.tasks import LegacyFairseqTask, register_task
 
 
 def get_asr_dataset_from_json(data_json_path, tgt_dict):
@@ -66,7 +65,7 @@ def get_asr_dataset_from_json(data_json_path, tgt_dict):
 
 
 @register_task("speech_recognition")
-class SpeechRecognitionTask(LegacyFairseqTask):
+class SpeechRecognitionTask(FairseqTask):
     """
     Task for training speech recognition model.
     """
@@ -77,20 +76,6 @@ class SpeechRecognitionTask(LegacyFairseqTask):
         parser.add_argument("data", help="path to data directory")
         parser.add_argument(
             "--silence-token", default="\u2581", help="token for silence (used by w2l)"
-        )
-        parser.add_argument(
-            "--max-source-positions",
-            default=sys.maxsize,
-            type=int,
-            metavar="N",
-            help="max number of frames in the source sequence",
-        )
-        parser.add_argument(
-            "--max-target-positions",
-            default=1024,
-            type=int,
-            metavar="N",
-            help="max number of tokens in the target sequence",
         )
 
     def __init__(self, args, tgt_dict):
@@ -123,7 +108,7 @@ class SpeechRecognitionTask(LegacyFairseqTask):
         data_json_path = os.path.join(self.args.data, "{}.json".format(split))
         self.datasets[split] = get_asr_dataset_from_json(data_json_path, self.tgt_dict)
 
-    def build_generator(self, models, args, **unused):
+    def build_generator(self, models, args):
         w2l_decoder = getattr(args, "w2l_decoder", None)
         if w2l_decoder == "viterbi":
             from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder
@@ -133,10 +118,6 @@ class SpeechRecognitionTask(LegacyFairseqTask):
             from examples.speech_recognition.w2l_decoder import W2lKenLMDecoder
 
             return W2lKenLMDecoder(args, self.target_dictionary)
-        elif w2l_decoder == "fairseqlm":
-            from examples.speech_recognition.w2l_decoder import W2lFairseqLMDecoder
-
-            return W2lFairseqLMDecoder(args, self.target_dictionary)
         else:
             return super().build_generator(models, args)
 
@@ -151,7 +132,3 @@ class SpeechRecognitionTask(LegacyFairseqTask):
         """Return the source :class:`~fairseq.data.Dictionary` (if applicable
         for this task)."""
         return None
-
-    def max_positions(self):
-        """Return the max speech and sentence length allowed by the task."""
-        return (self.args.max_source_positions, self.args.max_target_positions)

@@ -12,13 +12,13 @@ import torch
 from fairseq.data.dictionary import Dictionary
 from fairseq.models.transformer import TransformerModel
 from fairseq.modules import multihead_attention, sinusoidal_positional_embedding
-from fairseq.tasks.fairseq_task import LegacyFairseqTask
+from fairseq.tasks.fairseq_task import FairseqTask
 
 
 DEFAULT_TEST_VOCAB_SIZE = 100
 
 
-class DummyTask(LegacyFairseqTask):
+class DummyTask(FairseqTask):
     def __init__(self, args):
         super().__init__(args)
         self.dictionary = get_dummy_dictionary()

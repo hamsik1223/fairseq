@@ -60,9 +60,7 @@ def coalesce(x: Optional[Tensor], y: Tensor) -> Tensor:
 
 
 @torch.jit.script
-def fill_tensors(
-    x: Optional[Tensor], mask, y: Optional[Tensor], padding_idx: int
-) -> Optional[Tensor]:
+def fill_tensors(x: Optional[Tensor], mask, y: Optional[Tensor], padding_idx: int) -> Optional[Tensor]:
     """
     Filling tensor x with y at masked positions (dim=0).
     """
@@ -84,9 +82,9 @@ def fill_tensors(
     elif x.size(1) > y.size(1):
         x[mask] = torch.tensor(padding_idx).type_as(x)
         if x.dim() == 2:
-            x[mask, : y.size(1)] = y
+            x[mask, :y.size(1)] = y
         else:
-            x[mask, : y.size(1), :] = y
+            x[mask, :y.size(1), :] = y
     else:
         x[mask] = y
     return x

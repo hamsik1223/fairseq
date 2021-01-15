@@ -6,9 +6,8 @@
 import os
 from collections import Counter
 
-import torch
-from fairseq.file_io import PathManager
 from fairseq.tokenizer import tokenize_line
+import torch
 
 
 def safe_readline(f):
@@ -41,7 +40,7 @@ class Binarizer:
             if idx == dict.unk_index and word != dict.unk_word:
                 replaced.update([word])
 
-        with open(PathManager.get_local_path(filename), "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8") as f:
             f.seek(offset)
             # next(f) breaks f.tell(), hence readline() must be used
             line = safe_readline(f)
@@ -80,7 +79,7 @@ class Binarizer:
     def binarize_alignments(filename, alignment_parser, consumer, offset=0, end=-1):
         nseq = 0
 
-        with open(PathManager.get_local_path(filename), "r") as f:
+        with open(filename, "r") as f:
             f.seek(offset)
             line = safe_readline(f)
             while line:
@@ -94,7 +93,7 @@ class Binarizer:
 
     @staticmethod
     def find_offsets(filename, num_chunks):
-        with open(PathManager.get_local_path(filename), "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8") as f:
             size = os.fstat(f.fileno()).st_size
             chunk_size = size // num_chunks
             offsets = [0 for _ in range(num_chunks + 1)]

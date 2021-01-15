@@ -11,15 +11,16 @@ import tests.utils as test_utils
 import torch
 from fairseq import search
 from fairseq.data.dictionary import Dictionary
+
 from fairseq.models.transformer import TransformerModel
-from fairseq.sequence_generator import EnsembleModel, SequenceGenerator
-from fairseq.tasks.fairseq_task import LegacyFairseqTask
+from fairseq.sequence_generator import SequenceGenerator, EnsembleModel
+from fairseq.tasks.fairseq_task import FairseqTask
 
 
 DEFAULT_TEST_VOCAB_SIZE = 100
 
 
-class DummyTask(LegacyFairseqTask):
+class DummyTask(FairseqTask):
     def __init__(self, args):
         super().__init__(args)
         self.dictionary = get_dummy_dictionary()
@@ -108,6 +109,7 @@ class TestJitSequenceGeneratorBase(unittest.TestCase):
 
 
 class TestJitSequeneceGenerator(TestJitSequenceGeneratorBase):
+
     @unittest.skipIf(
         torch.__version__ < "1.6.0", "Targeting OSS scriptability for the 1.6 release"
     )
@@ -128,6 +130,7 @@ class TestJitSequeneceGenerator(TestJitSequenceGeneratorBase):
 
 
 class TestJitEnsemble(TestJitSequenceGeneratorBase):
+
     @unittest.skipIf(
         torch.__version__ < "1.6.0", "Targeting OSS scriptability for the 1.6 release"
     )
@@ -187,14 +190,9 @@ class TestSequenceGeneratorBase(unittest.TestCase):
 
 class TestSequeneceGenerator(TestSequenceGeneratorBase):
     def setUp(self):
-        (
-            self.tgt_dict,
-            self.w1,
-            self.w2,
-            src_tokens,
-            src_lengths,
-            self.model,
-        ) = test_utils.sequence_generator_setup()
+        self.tgt_dict, self.w1, self.w2, src_tokens, src_lengths, self.model = (
+            test_utils.sequence_generator_setup()
+        )
         self.sample = {
             "net_input": {"src_tokens": src_tokens, "src_lengths": src_lengths}
         }
@@ -278,9 +276,7 @@ class TestSequeneceGenerator(TestSequenceGeneratorBase):
         self.assertHypoScore(hypos[1][1], [0.7, 0.4, 0.6], lenpen=lenpen)
 
     def test_maxlen(self):
-        generator = SequenceGenerator(
-            [self.model], self.tgt_dict, beam_size=2, max_len_b=2
-        )
+        generator = SequenceGenerator([self.model], self.tgt_dict, beam_size=2, max_len_b=2)
         hypos = generator.forward(self.sample)
         eos, w1, w2 = self.tgt_dict.eos(), self.w1, self.w2
         # sentence 1, beam 1
@@ -298,27 +294,21 @@ class TestSequeneceGenerator(TestSequenceGeneratorBase):
 
     def test_encoder_with_different_output_len(self):
         args = self.model.encoder.args
-        task = test_utils.TestTranslationTask.setup_task(
-            args, self.tgt_dict, self.tgt_dict
-        )
+        task = test_utils.TestTranslationTask.setup_task(args, self.tgt_dict, self.tgt_dict)
         reshaping_model = test_utils.TestReshapingModel.build_model(args, task)
-        generator = SequenceGenerator(
-            [reshaping_model], self.tgt_dict, beam_size=2, max_len_b=2
-        )
+        generator = SequenceGenerator([reshaping_model], self.tgt_dict, beam_size=2, max_len_b=2)
         hypos = generator.forward(self.sample)
         for sent in [0, 1]:
             for beam in [0, 1]:
-                assert hypos[sent][beam]["attention"] is not None
+                assert hypos[sent][beam]['attention'] is not None
 
     def test_generation_with_additional_input(self):
         args = self.model.encoder.args
-        task = test_utils.TestTranslationTask.setup_task(
-            args, self.tgt_dict, self.tgt_dict
-        )
+        task = test_utils.TestTranslationTask.setup_task(args, self.tgt_dict, self.tgt_dict)
         add_input_model = test_utils.TestAdditionalInputModel.build_model(args, task)
         generator = SequenceGenerator([add_input_model], self.tgt_dict, beam_size=2)
         sample = self.sample.copy()
-        sample["net_input"]["fancy_other_input"] = sample["net_input"]["src_tokens"]
+        sample['net_input']['fancy_other_input'] = sample['net_input']['src_tokens']
         hypos = generator.forward(self.sample)
         eos, w1, w2 = self.tgt_dict.eos(), self.w1, self.w2
         # sentence 1, beam 1
@@ -327,6 +317,7 @@ class TestSequeneceGenerator(TestSequenceGeneratorBase):
 
 
 class TestDiverseBeamSearch(TestSequenceGeneratorBase):
+
     def setUp(self):
         # construct dummy dictionary
         d = test_utils.dummy_dictionary(vocab_size=2)
@@ -338,53 +329,45 @@ class TestDiverseBeamSearch(TestSequenceGeneratorBase):
         self.w2 = 5
 
         # construct source data
-        self.src_tokens = torch.LongTensor(
-            [
-                [self.w1, self.w2, self.eos],
-                [self.w1, self.w2, self.eos],
-            ]
-        )
+        self.src_tokens = torch.LongTensor([
+            [self.w1, self.w2, self.eos],
+            [self.w1, self.w2, self.eos],
+        ])
         self.src_lengths = torch.LongTensor([2, 2])
 
         args = argparse.Namespace()
-        unk = 0.0
+        unk = 0.
         args.beam_probs = [
             # step 0:
-            torch.FloatTensor(
-                [
-                    # eos      w1   w2
-                    # sentence 1:
-                    [0.0, unk, 0.9, 0.1],  # beam 1
-                    [0.0, unk, 0.9, 0.1],  # beam 2
-                    # sentence 2:
-                    [0.0, unk, 0.7, 0.3],
-                    [0.0, unk, 0.7, 0.3],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos      w1   w2
+                # sentence 1:
+                [0.0, unk, 0.9, 0.1],  # beam 1
+                [0.0, unk, 0.9, 0.1],  # beam 2
+                # sentence 2:
+                [0.0, unk, 0.7, 0.3],
+                [0.0, unk, 0.7, 0.3],
+            ]),
             # step 1:
-            torch.FloatTensor(
-                [
-                    # eos      w1   w2
-                    # sentence 1:
-                    [0.0, unk, 0.6, 0.4],
-                    [0.0, unk, 0.6, 0.4],
-                    # sentence 2:
-                    [0.25, unk, 0.35, 0.4],
-                    [0.25, unk, 0.35, 0.4],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos      w1   w2
+                # sentence 1:
+                [0.0, unk, 0.6, 0.4],
+                [0.0, unk, 0.6, 0.4],
+                # sentence 2:
+                [0.25, unk, 0.35, 0.4],
+                [0.25, unk, 0.35, 0.4],
+            ]),
             # step 2:
-            torch.FloatTensor(
-                [
-                    # eos      w1   w2
-                    # sentence 1:
-                    [1.0, unk, 0.0, 0.0],
-                    [1.0, unk, 0.0, 0.0],
-                    # sentence 2:
-                    [0.9, unk, 0.1, 0.0],
-                    [0.9, unk, 0.1, 0.0],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos      w1   w2
+                # sentence 1:
+                [1.0, unk, 0.0, 0.0],
+                [1.0, unk, 0.0, 0.0],
+                # sentence 2:
+                [0.9, unk, 0.1, 0.0],
+                [0.9, unk, 0.1, 0.0],
+            ]),
         ]
 
         task = test_utils.TestTranslationTask.setup_task(args, d, d)
@@ -392,21 +375,11 @@ class TestDiverseBeamSearch(TestSequenceGeneratorBase):
         self.tgt_dict = task.target_dictionary
 
     def test_diverse_beam_search(self):
-        search_strategy = search.DiverseBeamSearch(
-            self.tgt_dict, num_groups=2, diversity_strength=0.0
-        )
+        search_strategy = search.DiverseBeamSearch(self.tgt_dict, num_groups=2, diversity_strength=0.)
         generator = SequenceGenerator(
-            [self.model],
-            self.tgt_dict,
-            beam_size=2,
-            search_strategy=search_strategy,
+            [self.model], self.tgt_dict, beam_size=2, search_strategy=search_strategy,
         )
-        sample = {
-            "net_input": {
-                "src_tokens": self.src_tokens,
-                "src_lengths": self.src_lengths,
-            }
-        }
+        sample = {'net_input': {'src_tokens': self.src_tokens, 'src_lengths': self.src_lengths}}
         hypos = generator.forward(sample)
         eos, w1, w2 = self.eos, self.w1, self.w2
         # sentence 1, beam 1
@@ -466,6 +439,7 @@ class TestDiverseSiblingsSearch(TestDiverseBeamSearch):
 
 
 class TestTopPSamplingSearch(TestSequenceGeneratorBase):
+
     def setUp(self):
         # construct dummy dictionary
         d = test_utils.dummy_dictionary(vocab_size=2)
@@ -477,16 +451,14 @@ class TestTopPSamplingSearch(TestSequenceGeneratorBase):
         self.w2 = 5
 
         # construct source data
-        self.src_tokens = torch.LongTensor(
-            [
-                [self.w1, self.w2, self.eos],
-                [self.w1, self.w2, self.eos],
-            ]
-        )
+        self.src_tokens = torch.LongTensor([
+            [self.w1, self.w2, self.eos],
+            [self.w1, self.w2, self.eos],
+        ])
         self.src_lengths = torch.LongTensor([2, 2])
 
         args = argparse.Namespace()
-        unk = 0.0
+        unk = 0.
         # The minimal probability of top 2 tokens.
         self.min_top2_prob = 0.75
         # The minimal probability of the top 1 token.
@@ -498,35 +470,29 @@ class TestTopPSamplingSearch(TestSequenceGeneratorBase):
 
         args.beam_probs = [
             # step 0:
-            torch.FloatTensor(
-                [
-                    # eos      w1   w2
-                    [0.0, unk, 1.0, 0.0],
-                    [0.0, unk, 1.0, 0.0],
-                    [0.0, unk, 1.0, 0.0],
-                    [0.0, unk, 1.0, 0.0],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos      w1   w2
+                [0.0, unk, 1.0, 0.0],
+                [0.0, unk, 1.0, 0.0],
+                [0.0, unk, 1.0, 0.0],
+                [0.0, unk, 1.0, 0.0],
+            ]),
             # step 1:
-            torch.FloatTensor(
-                [
-                    # eos           w1       w2
-                    [eos_prob, unk, w1_prob, w2_prob],
-                    [eos_prob, unk, w1_prob, w2_prob],
-                    [eos_prob, unk, w1_prob, w2_prob],
-                    [eos_prob, unk, w1_prob, w2_prob],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos           w1       w2
+                [eos_prob, unk, w1_prob, w2_prob],
+                [eos_prob, unk, w1_prob, w2_prob],
+                [eos_prob, unk, w1_prob, w2_prob],
+                [eos_prob, unk, w1_prob, w2_prob],
+            ]),
             # step 2:
-            torch.FloatTensor(
-                [
-                    # eos      w1   w2
-                    [1.0, unk, 0.0, 0.0],
-                    [1.0, unk, 0.0, 0.0],
-                    [1.0, unk, 0.0, 0.0],
-                    [1.0, unk, 0.0, 0.0],
-                ]
-            ),
+            torch.FloatTensor([
+                # eos      w1   w2
+                [1.0, unk, 0.0, 0.0],
+                [1.0, unk, 0.0, 0.0],
+                [1.0, unk, 0.0, 0.0],
+                [1.0, unk, 0.0, 0.0],
+            ]),
         ]
 
         task = test_utils.TestTranslationTask.setup_task(args, d, d)
@@ -536,17 +502,14 @@ class TestTopPSamplingSearch(TestSequenceGeneratorBase):
     def test_topp_sampling_search_low_prob(self):
         # Given a prob low enough to top-P sampling, we expect only the top
         # 1 token to be sampled, which always results in the same output.
-        low_sampling_topp = self.min_top1_prob / 2.0
-        search_strategy = search.Sampling(
-            self.tgt_dict, sampling_topp=low_sampling_topp
-        )
+        low_sampling_topp = self.min_top1_prob/2.0
+        search_strategy = search.Sampling(self.tgt_dict, sampling_topp=low_sampling_topp)
         generator = SequenceGenerator(
-            [self.model], self.tgt_dict, beam_size=2, search_strategy=search_strategy
-        )
+            [self.model], self.tgt_dict, beam_size=2, search_strategy=search_strategy)
         sample = {
-            "net_input": {
-                "src_tokens": self.src_tokens,
-                "src_lengths": self.src_lengths,
+            'net_input': {
+                'src_tokens': self.src_tokens,
+                'src_lengths': self.src_lengths
             }
         }
         hypos = generator.forward(sample)
@@ -567,74 +530,55 @@ class TestTopPSamplingSearch(TestSequenceGeneratorBase):
     def test_topp_sampling_search_high_prob(self):
         # Given a prob high enough to top-P sampling, any of the top 2
         # tokens could be sampled. This can cause different outputs.
-        high_sampling_topp = (self.min_top1_prob + self.min_top2_prob) / 2.0
-        search_strategy = search.Sampling(
-            self.tgt_dict, sampling_topp=high_sampling_topp
-        )
+        high_sampling_topp = (self.min_top1_prob+self.min_top2_prob)/2.0
+        search_strategy = search.Sampling(self.tgt_dict, sampling_topp=high_sampling_topp)
         generator = SequenceGenerator(
-            [self.model], self.tgt_dict, beam_size=2, search_strategy=search_strategy
-        )
+            [self.model], self.tgt_dict, beam_size=2, search_strategy=search_strategy)
         sample = {
-            "net_input": {
-                "src_tokens": self.src_tokens,
-                "src_lengths": self.src_lengths,
+            'net_input': {
+                'src_tokens': self.src_tokens,
+                'src_lengths': self.src_lengths
             }
         }
         hypos = generator.forward(sample)
         eos, w1, w2 = self.eos, self.w1, self.w2
         # sentence 1, beam 1
-        self.assertTrue(
-            self.hypoTokens(hypos[0][0], [w1, w1, eos])
-            or self.hypoTokens(hypos[0][0], [w1, w2, eos])
-        )
-        self.assertTrue(
-            self.hypoScore(hypos[0][0], [1.0, 0.4, 1.0])
-            or self.hypoScore(hypos[0][0], [1.0, 0.35, 1.0])
-        )
+        self.assertTrue(self.hypoTokens(hypos[0][0], [w1, w1, eos]) or
+                        self.hypoTokens(hypos[0][0], [w1, w2, eos]))
+        self.assertTrue(self.hypoScore(hypos[0][0], [1.0, 0.4, 1.0]) or
+                        self.hypoScore(hypos[0][0], [1.0, 0.35, 1.0]))
 
         # sentence 1, beam 2
-        self.assertTrue(
-            self.hypoTokens(hypos[0][1], [w1, w1, eos])
-            or self.hypoTokens(hypos[0][1], [w1, w2, eos])
-        )
-        self.assertTrue(
-            self.hypoScore(hypos[0][1], [1.0, 0.4, 1.0])
-            or self.hypoScore(hypos[0][1], [1.0, 0.35, 1.0])
-        )
+        self.assertTrue(self.hypoTokens(hypos[0][1], [w1, w1, eos]) or
+                        self.hypoTokens(hypos[0][1], [w1, w2, eos]))
+        self.assertTrue(self.hypoScore(hypos[0][1], [1.0, 0.4, 1.0]) or
+                        self.hypoScore(hypos[0][1], [1.0, 0.35, 1.0]))
 
         # sentence 2, beam 1
-        self.assertTrue(
-            self.hypoTokens(hypos[1][0], [w1, w1, eos])
-            or self.hypoTokens(hypos[1][0], [w1, w2, eos])
-        )
-        self.assertTrue(
-            self.hypoScore(hypos[1][0], [1.0, 0.4, 1.0])
-            or self.hypoScore(hypos[1][0], [1.0, 0.35, 1.0])
-        )
+        self.assertTrue(self.hypoTokens(hypos[1][0], [w1, w1, eos]) or
+                        self.hypoTokens(hypos[1][0], [w1, w2, eos]))
+        self.assertTrue(self.hypoScore(hypos[1][0], [1.0, 0.4, 1.0]) or
+                        self.hypoScore(hypos[1][0], [1.0, 0.35, 1.0]))
 
         # sentence 2, beam 2
-        self.assertTrue(
-            self.hypoTokens(hypos[1][1], [w1, w1, eos])
-            or self.hypoTokens(hypos[1][1], [w1, w2, eos])
-        )
-        self.assertTrue(
-            self.hypoScore(hypos[1][1], [1.0, 0.4, 1.0])
-            or self.hypoScore(hypos[1][1], [1.0, 0.35, 1.0])
-        )
+        self.assertTrue(self.hypoTokens(hypos[1][1], [w1, w1, eos]) or
+                        self.hypoTokens(hypos[1][1], [w1, w2, eos]))
+        self.assertTrue(self.hypoScore(hypos[1][1], [1.0, 0.4, 1.0]) or
+                        self.hypoScore(hypos[1][1], [1.0, 0.35, 1.0]))
 
     def hypoTokens(self, hypo, tokens):
-        return self.tensorEqual(hypo["tokens"], torch.LongTensor(tokens))
+        return self.tensorEqual(hypo['tokens'], torch.LongTensor(tokens))
 
-    def hypoScore(self, hypo, pos_probs, normalized=True, lenpen=1.0):
+    def hypoScore(self, hypo, pos_probs, normalized=True, lenpen=1.):
         pos_scores = torch.FloatTensor(pos_probs).log()
-        if not self.almostEqual(hypo["positional_scores"], pos_scores):
+        if not self.almostEqual(hypo['positional_scores'], pos_scores):
             return False
-        if pos_scores.numel() != hypo["tokens"].numel():
+        if pos_scores.numel() != hypo['tokens'].numel():
             return False
         score = pos_scores.sum()
         if normalized:
             score /= pos_scores.numel() ** lenpen
-        return abs(score - hypo["score"]) < 1e-6
+        return abs(score - hypo['score']) < 1e-6
 
     def almostEqual(self, t1, t2):
         return t1.size() == t2.size() and (t1 - t2).abs().max() < 1e-4

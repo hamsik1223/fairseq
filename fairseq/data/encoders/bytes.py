@@ -5,17 +5,13 @@
 
 
 from fairseq.data.encoders import register_bpe
-from fairseq.data.encoders.byte_utils import (
-    SPACE,
-    SPACE_ESCAPE,
-    byte_encode,
-    smart_byte_decode,
-)
+from fairseq.data.encoders.byte_utils import (byte_encode, smart_byte_decode,
+                                              SPACE, SPACE_ESCAPE)
 
 
-@register_bpe("bytes")
+@register_bpe('bytes')
 class Bytes(object):
-    def __init__(self, *unused):
+    def __init__(self, args):
         pass
 
     @staticmethod
@@ -30,5 +26,5 @@ class Bytes(object):
 
     @staticmethod
     def decode(x: str) -> str:
-        unescaped = x.replace(SPACE, "").replace(SPACE_ESCAPE, SPACE)
+        unescaped = x.replace(SPACE, '').replace(SPACE_ESCAPE, SPACE)
         return smart_byte_decode(unescaped)

@@ -178,6 +178,16 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
                             help='block size of quantization noise at training time')
         parser.add_argument('--quant-noise-scalar', type=float, metavar='D', default=0,
                             help='scalar quantization noise and scalar quantization at training time')
+        # args for using learned relative positional embeddings
+        parser.add_argument('--use-relative-pos-embeddings', default=False, action='store_true',
+                            help='Use learned relative positions in multi-head self attention')
+        parser.add_argument('--max-relative-pos', type=int, default=128,
+                            help='Max relative position to create an embedding for.')
+        parser.add_argument('--heads-share-embeddings', default=False, action='store_true',
+                            help='Heads share the same relative positional embeddings')
+        parser.add_argument('--add-pos-embeddings-to-values', default=False, action='store_true',
+                            help='Add relative positional embeddings to values (apart from keys)')
+        
         # fmt: on
 
     @classmethod

@@ -14,9 +14,8 @@ import sentencepiece as spm
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model", required=True, help="sentencepiece model to use for decoding"
-    )
+    parser.add_argument("--model", required=True,
+                        help="sentencepiece model to use for decoding")
     parser.add_argument("--input", required=True, help="input file to decode")
     parser.add_argument("--input_format", choices=["piece", "id"], default="piece")
     args = parser.parse_args()
@@ -25,15 +24,11 @@ def main():
     sp.Load(args.model)
 
     if args.input_format == "piece":
-
         def decode(l):
             return "".join(sp.DecodePieces(l))
-
     elif args.input_format == "id":
-
         def decode(l):
             return "".join(sp.DecodeIds(l))
-
     else:
         raise NotImplementedError
 
@@ -47,7 +42,6 @@ def main():
                 print(decode(list(map(tok2int, line.rstrip().split()))))
             elif args.input_format == "piece":
                 print(decode(line.rstrip().split()))
-
 
 if __name__ == "__main__":
     main()

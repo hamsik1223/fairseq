@@ -5,11 +5,11 @@
 
 import math
 
-from . import LegacyFairseqLRScheduler, register_lr_scheduler
+from . import FairseqLRScheduler, register_lr_scheduler
 
 
-@register_lr_scheduler("triangular")
-class TriangularSchedule(LegacyFairseqLRScheduler):
+@register_lr_scheduler('triangular')
+class TriangularSchedule(FairseqLRScheduler):
     """Assign LR based on a triangular cyclical schedule.
 
     See https://arxiv.org/pdf/1506.01186.pdf for details.
@@ -19,13 +19,13 @@ class TriangularSchedule(LegacyFairseqLRScheduler):
         super().__init__(args, optimizer)
         if len(args.lr) > 1:
             raise ValueError(
-                "Cannot use a fixed learning rate schedule with triangular."
-                " Consider --lr-scheduler=fixed instead."
+                'Cannot use a fixed learning rate schedule with triangular.'
+                ' Consider --lr-scheduler=fixed instead.'
             )
 
         lr = args.lr[0]
 
-        assert args.max_lr > lr, "max_lr must be more than lr"
+        assert args.max_lr > lr, 'max_lr must be more than lr'
         self.min_lr = lr
         self.max_lr = args.max_lr
         self.stepsize = args.lr_period_updates // 2

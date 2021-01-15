@@ -21,13 +21,13 @@ class Dictionary(object):
     def __init__(
         self,
         *,  # begin keyword-only arguments
-        bos="<s>",
         pad="<pad>",
         eos="</s>",
         unk="<unk>",
+        bos="<s>",
         extra_special_symbols=None,
     ):
-        self.bos_word, self.unk_word, self.pad_word, self.eos_word = bos, unk, pad, eos
+        self.unk_word, self.pad_word, self.eos_word = unk, pad, eos
         self.symbols = []
         self.count = []
         self.indices = {}
@@ -101,7 +101,7 @@ class Dictionary(object):
             if utils.item(i) not in extra_symbols_to_ignore
         )
 
-        return data_utils.post_process(sent, bpe_symbol)
+        return data_utils.process_bpe_symbol(sent, bpe_symbol)
 
     def unk_string(self, escape=False):
         """Return unknown string, optionally escaped as: <<unk>>"""
@@ -221,7 +221,7 @@ class Dictionary(object):
         """
         if isinstance(f, str):
             try:
-                with open(PathManager.get_local_path(f), "r", encoding="utf-8") as fd:
+                with PathManager.open(f, "r", encoding="utf-8") as fd:
                     self.add_from_file(fd)
             except FileNotFoundError as fnfe:
                 raise fnfe
@@ -251,7 +251,8 @@ class Dictionary(object):
                         "Duplicate words can overwrite earlier ones by adding the "
                         "#fairseq:overwrite flag at the end of the corresponding row "
                         "in the dictionary file. If using the Camembert model, please "
-                        "download an updated copy of the model file.".format(word)
+                        "download an updated copy of the model file."
+                        .format(word)
                     )
                 self.add_symbol(word, n=count, overwrite=overwrite)
             except ValueError:

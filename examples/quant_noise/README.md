@@ -1,4 +1,4 @@
-# Training with Quantization Noise for Extreme Model Compression ({Fan\*, Stock\*} *et al.*, 2020)
+# Training with Quantization Noise for Extreme Model Compression ({Fan\*, Stock\*} *et al.*, 2019)
 This page contains information for how to train and quantize models with Quantization Noise, for both scalar quantization like `int8` and Iterative Product Quantization.
 Check out our paper [here](https://arxiv.org/abs/2004.07320).
 
@@ -151,7 +151,7 @@ fairseq-train $DATA_DIR \
     --warmup-updates $WARMUP_UPDATES --total-num-update $TOTAL_UPDATES \
     --dropout 0.1 --attention-dropout 0.1 \
     --weight-decay 0.01 \
-    --batch-size $MAX_SENTENCES \
+    --max-sentences $MAX_SENTENCES \
     --update-freq $UPDATE_FREQ --max-update $TOTAL_UPDATES \
     --save-dir checkpoint/roberta \
     --ddp-backend no_c10d --encoder-layerdrop 0.2 \
@@ -172,7 +172,7 @@ ROBERTA_PATH=/path/to/roberta_quantnoise/model.pt
 fairseq-train /path/to/rte/data/ \
     --restore-file $ROBERTA_PATH \
     --max-positions 512 \
-    --batch-size $MAX_SENTENCES \
+    --max-sentences $MAX_SENTENCES \
     --max-tokens 4400 \
     --task sentence_prediction \
     --reset-optimizer --reset-dataloader --reset-meters \
@@ -219,7 +219,7 @@ fairseq-train --task language_modeling /path/to/wikitext-103/data \
 To **evaluate** this model, note you need to use the `eval.py` script. The following command can be used to evaluate:
 
 ```bash
-fairseq-eval-lm /path/to/wikitext-103/data --path /path/to/model/checkpoint \
+python eval_lm.py /path/to/wikitext-103/data --path /path/to/model/checkpoint \
     --sample-break-mode complete \
     --max-tokens 3072 \
     --context-window 2560 \
@@ -242,7 +242,7 @@ fairseq-train --task sentence_prediction /path/to/data/ \
     --restore-file $ROBERTA_PATH \
     --save-dir checkpoints/roberta_finetuned \
     --max-positions 512 \
-    --batch-size $MAX_SENTENCES \
+    --max-sentences $MAX_SENTENCES \
     --max-tokens 4400 \
     --init-token 0 --separator-token 2 \
     --arch roberta_large \
