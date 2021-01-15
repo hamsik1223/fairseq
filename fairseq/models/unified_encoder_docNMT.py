@@ -464,7 +464,7 @@ class FlatTransformerEncoder(FairseqEncoder):
         if sen_emb_method == 'bysegment':
             B=src_tokens.size()[0]
             _device = x.device
-            segment_embed = torch.zeros(x.size(), device = _device)
+            segment_embed = torch.zeros(x.size(), device = _device, dtype = x.dtype)
             for i in range(B):
                 segment_embed[i, (1+src_tokens_start[i]): (1+src_tokens_end[i]), :] = 1
             x = x + segment_embed

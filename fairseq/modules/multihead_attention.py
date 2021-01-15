@@ -9,11 +9,11 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from fairseq import utils
-from fairseq.incremental_decoding_utils import with_incremental_state
-from fairseq.modules.fairseq_dropout import FairseqDropout
-from fairseq.modules.quant_noise import quant_noise
 from torch import Tensor, nn
 from torch.nn import Parameter
+from fairseq.incremental_decoding_utils import with_incremental_state
+from fairseq.modules.quant_noise import quant_noise
+from .positional_embedding import RelativePositionalEmbedding
 
 
 @with_incremental_state
@@ -37,6 +37,10 @@ class MultiheadAttention(nn.Module):
         encoder_decoder_attention=False,
         q_noise=0.0,
         qn_block_size=8,
+        relative_pos_type=None,
+        max_relative_pos=None,
+        heads_share_embeddings=False,
+        add_pos_embeddings_to_values=False
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -45,10 +49,7 @@ class MultiheadAttention(nn.Module):
         self.qkv_same_dim = self.kdim == embed_dim and self.vdim == embed_dim
 
         self.num_heads = num_heads
-        self.dropout_module = FairseqDropout(
-            dropout, module_name=self.__class__.__name__
-        )
-
+        self.dropout = dropout
         self.head_dim = embed_dim // num_heads
         assert (
             self.head_dim * num_heads == self.embed_dim
@@ -62,19 +63,11 @@ class MultiheadAttention(nn.Module):
             "Self-attention requires query, key and " "value to be of the same size"
         )
 
-        self.k_proj = quant_noise(
-            nn.Linear(self.kdim, embed_dim, bias=bias), q_noise, qn_block_size
-        )
-        self.v_proj = quant_noise(
-            nn.Linear(self.vdim, embed_dim, bias=bias), q_noise, qn_block_size
-        )
-        self.q_proj = quant_noise(
-            nn.Linear(embed_dim, embed_dim, bias=bias), q_noise, qn_block_size
-        )
+        self.k_proj = quant_noise(nn.Linear(self.kdim, embed_dim, bias=bias), q_noise, qn_block_size)
+        self.v_proj = quant_noise(nn.Linear(self.vdim, embed_dim, bias=bias), q_noise, qn_block_size)
+        self.q_proj = quant_noise(nn.Linear(embed_dim, embed_dim, bias=bias), q_noise, qn_block_size)
 
-        self.out_proj = quant_noise(
-            nn.Linear(embed_dim, embed_dim, bias=bias), q_noise, qn_block_size
-        )
+        self.out_proj = quant_noise(nn.Linear(embed_dim, embed_dim, bias=bias), q_noise, qn_block_size)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.Tensor(1, 1, embed_dim))
@@ -88,6 +81,23 @@ class MultiheadAttention(nn.Module):
 
         self.onnx_trace = False
         self.tpu = False
+
+        self.positional_embedding_layer = None
+        self.unmasked_attention = None
+        self.add_pos_embeddings_to_values = add_pos_embeddings_to_values
+        if relative_pos_type is not None:
+            if add_pos_embeddings_to_values:
+                self.enable_torch_version = False
+            self.unmasked_attention = (relative_pos_type == "unmasked")
+            self.heads_share_embeddings = heads_share_embeddings
+            self.positional_embedding_layer = RelativePositionalEmbedding(
+                max_relative_pos=max_relative_pos,
+                num_heads=num_heads,
+                embedding_dim=self.head_dim,
+                unmasked=self.unmasked_attention,
+                heads_share_embeddings=heads_share_embeddings,
+                add_to_values=add_pos_embeddings_to_values
+            )
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
@@ -109,7 +119,7 @@ class MultiheadAttention(nn.Module):
 
         nn.init.xavier_uniform_(self.out_proj.weight)
         if self.out_proj.bias is not None:
-            nn.init.constant_(self.out_proj.bias, 0.0)
+            nn.init.constant_(self.out_proj.bias, 0.)
         if self.bias_k is not None:
             nn.init.xavier_normal_(self.bias_k)
         if self.bias_v is not None:
@@ -162,6 +172,26 @@ class MultiheadAttention(nn.Module):
             and not torch.jit.is_scripting()
         ):
             assert key is not None and value is not None
+
+            if self.positional_embedding_layer is not None:
+                # even by recalculating queries, torch version is around
+                # 5% faster than fairseq version
+                q = self.q_proj(query)
+                q *= self.scaling
+                q = q.view(q.shape[0], -1, self.head_dim)
+                saved_state = None
+                if incremental_state is not None:
+                    saved_state = self._get_input_buffer(incremental_state)
+
+                positional_logits, _ = self.positional_embedding_layer(q, saved_state)
+
+                if attn_mask is not None:
+                    # The mask is added to "attention logits" before
+                    # softmax, and originally contains -inf to mask positions
+                    attn_mask = attn_mask + positional_logits
+                else:
+                    attn_mask = positional_logits
+
             return F.multi_head_attention_forward(
                 query,
                 key,
@@ -173,10 +203,10 @@ class MultiheadAttention(nn.Module):
                 self.bias_k,
                 self.bias_v,
                 self.add_zero_attn,
-                self.dropout_module.p,
+                self.dropout,
                 self.out_proj.weight,
                 self.out_proj.bias,
-                self.training or self.dropout_module.apply_during_inference,
+                self.training,
                 key_padding_mask,
                 need_weights,
                 attn_mask,
@@ -235,9 +265,22 @@ class MultiheadAttention(nn.Module):
                     dim=1,
                 )
 
+        q = q.contiguous()
+
+        if self.positional_embedding_layer is not None:
+            q = q.view(q.shape[0], -1, self.head_dim)
+            positional_logits, values_embeddings = self.positional_embedding_layer(q, saved_state)
+            if attn_mask is not None:
+                # The mask is added to "attention logits" before
+                # softmax, and originally contains -inf to mask positions
+                if len(attn_mask.shape) == 2:
+                    attn_mask = attn_mask.unsqueeze(0)
+                attn_mask = attn_mask + positional_logits  # TODO += doesnt work here
+            else:
+                attn_mask = positional_logits
+
         q = (
-            q.contiguous()
-            .view(tgt_len, bsz * self.num_heads, self.head_dim)
+            q.view(tgt_len, bsz * self.num_heads, self.head_dim)
             .transpose(0, 1)
         )
         if k is not None:
@@ -324,15 +367,16 @@ class MultiheadAttention(nn.Module):
                 )
 
         attn_weights = torch.bmm(q, k.transpose(1, 2))
-        attn_weights = self.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
+        attn_weights = MultiheadAttention.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
 
         assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
-            attn_mask = attn_mask.unsqueeze(0)
-            if self.onnx_trace:
-                attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
-            attn_weights += attn_mask
+            if len(attn_mask.shape) == 2:
+                attn_mask = attn_mask.unsqueeze(0)
+                if self.onnx_trace:
+                    attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
+            attn_weights = attn_weights + attn_mask
 
         if key_padding_mask is not None:
             # don't attend to padding symbols
@@ -340,11 +384,11 @@ class MultiheadAttention(nn.Module):
             if not self.tpu:
                 attn_weights = attn_weights.masked_fill(
                     key_padding_mask.unsqueeze(1).unsqueeze(2).to(torch.bool),
-                    float("-inf"),
+                    float("-inf")
                 )
             else:
                 attn_weights = attn_weights.transpose(0, 2)
-                attn_weights = attn_weights.masked_fill(key_padding_mask, float("-inf"))
+                attn_weights = attn_weights.masked_fill(key_padding_mask, float('-inf'))
                 attn_weights = attn_weights.transpose(0, 2)
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
@@ -355,17 +399,25 @@ class MultiheadAttention(nn.Module):
             attn_weights, dim=-1, onnx_trace=self.onnx_trace
         )
         attn_weights = attn_weights_float.type_as(attn_weights)
-        attn_probs = self.dropout_module(attn_weights)
-
+        attn_probs = F.dropout(
+            attn_weights,
+            p=self.dropout,
+            training=self.training,
+        )
         assert v is not None
         attn = torch.bmm(attn_probs, v)
         assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
+
+        if self.positional_embedding_layer is not None and self.add_pos_embeddings_to_values:
+            attn += self._positional_values_attn(attn_probs, values_embeddings, bsz, tgt_len)
+
         if self.onnx_trace and attn.size(1) == 1:
             # when ONNX tracing a single decoder step (sequence length == 1)
             # the transpose is a no-op copy before view, thus unnecessary
             attn = attn.contiguous().view(tgt_len, bsz, embed_dim)
         else:
             attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+
         attn = self.out_proj(attn)
         attn_weights: Optional[Tensor] = None
         if need_weights:
@@ -418,9 +470,7 @@ class MultiheadAttention(nn.Module):
 
     @torch.jit.export
     def reorder_incremental_state(
-        self,
-        incremental_state: Dict[str, Dict[str, Optional[Tensor]]],
-        new_order: Tensor,
+        self, incremental_state: Dict[str, Dict[str, Optional[Tensor]]], new_order: Tensor
     ):
         """Reorder buffered internal state (for incremental generation)."""
         input_buffer = self._get_input_buffer(incremental_state)
@@ -428,9 +478,7 @@ class MultiheadAttention(nn.Module):
             for k in input_buffer.keys():
                 input_buffer_k = input_buffer[k]
                 if input_buffer_k is not None:
-                    if self.encoder_decoder_attention and input_buffer_k.size(
-                        0
-                    ) == new_order.size(0):
+                    if self.encoder_decoder_attention and input_buffer_k.size(0) == new_order.size(0):
                         break
                     input_buffer[k] = input_buffer_k.index_select(0, new_order)
             incremental_state = self._set_input_buffer(incremental_state, input_buffer)
@@ -453,7 +501,7 @@ class MultiheadAttention(nn.Module):
     ):
         return self.set_incremental_state(incremental_state, "attn_state", buffer)
 
-    def apply_sparse_mask(self, attn_weights, tgt_len: int, src_len: int, bsz: int):
+    def apply_sparse_mask(attn_weights, tgt_len: int, src_len: int, bsz: int):
         return attn_weights
 
     def upgrade_state_dict_named(self, state_dict, name):
@@ -486,3 +534,54 @@ class MultiheadAttention(nn.Module):
 
         for key, value in items_to_add.items():
             state_dict[key] = value
+
+    def _positional_values_attn(self, attn_probs, values_embeddings, bsz, tgt_len):
+        """
+        Compute positional attention context vector using relative positional embeddings
+        for values, while using the same attention distribution as used to compute
+        the regular context vector.
+
+        Args:
+            attn_probs (torch.Tensor): attention distribution over values
+            values_embeddings (torch.Tensor): relative positional embeddings for values
+            bsz (int): batch size
+            tgt_len (int): length of queries (or the resulting attention)
+        """
+        assert values_embeddings is not None, ("Relative positional embeddings for "
+                                               "values were not created")
+
+        if attn_probs.shape[1] != 1:  # absolute and relative are same when len == 1 (inference)
+            attn_probs = self._absolute_to_relative_weights(attn_probs)
+
+        if self.heads_share_embeddings:
+            positional_attn = torch.einsum("blm,md->bld", attn_probs, values_embeddings)
+        else:
+            attn_probs = attn_probs.view(bsz, self.num_heads, tgt_len, -1)
+            positional_attn = torch.einsum("bhlm,hmd->bhld", attn_probs, values_embeddings)
+            positional_attn = positional_attn.contiguous().view(
+                bsz*self.num_heads, tgt_len, self.head_dim
+            )
+        return positional_attn
+
+    def _absolute_to_relative_weights(self, weights):
+        """
+        Index attention weights with position relative to the queries given
+        attention weights indexed using absolute positions
+
+        Args:
+            weights (torch.Tensor): attention weights of shape `(-1, length, length)`
+
+        Returns:
+            torch.Tensor: relative attention weights of shape `(-1, length, length)`
+                          if decoder attention or `(-1, length, 2*length - 1)` if encoder
+        """
+        length = weights.shape[1]
+        if self.unmasked_attention:
+            weights = F.pad(weights, (0, length-1))
+            weights = weights.view(-1, length**2 + length*(length - 1))
+            weights = F.pad(weights, (length, 0))
+            weights = weights.view(-1, length, 2*length)
+        else:
+            weights = F.pad(weights, (0, 0, 1, 0))
+            weights = weights.view(-1, length, length + 1)
+        return weights[:, :, 1:]
