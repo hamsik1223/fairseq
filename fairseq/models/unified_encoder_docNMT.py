@@ -360,6 +360,7 @@ class FlatTransformerEncoder(FairseqEncoder):
             if not True
             else None
         )
+        self.use_relative_pos_embeddings = args.use_relative_pos_embeddings
 
         if not args.adaptive_input and args.quant_noise_pq > 0:
             self.quant_noise = apply_quant_noise_(
@@ -536,7 +537,7 @@ class FlatTransformerEncoder(FairseqEncoder):
                 encoder_states.append(x)
         # mask the context sentences 
         ###based on the src_tokens, produce the source sentence's indexes
-        if not args.use_relative_pos_embeddings:
+        if not self.use_relative_pos_embeddings:
             encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
         # encoder layers, for top layers
         for top_layer in range(self.top_layers):
@@ -1008,7 +1009,7 @@ def Linear(in_features, out_features, bias=True):
 
 
 @register_model_architecture("flat_transformer", "flat_transformer")
-def flat_transformer(args):
+def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
@@ -1065,4 +1066,4 @@ def flat_transformer(args):
 @register_model_architecture("flat_transformer", "flat_transformer_rel_senpos_embeddings")
 def flat_transformer_rel_senpos_embeddings(args):
     args.use_relative_pos_embeddings = getattr(args, "use_relative_pos_embeddings", True)
-    flat_transformer(args)
+    base_architecture(args)

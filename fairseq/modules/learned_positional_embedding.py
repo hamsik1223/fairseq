@@ -274,7 +274,7 @@ class LearnedRelativePositionalEmbedding(nn.Module):
         sentence_position_index_matrix = sentence_position_index.view(1, batch_size,length).repeat([length,1,1])
         sentence_position_index_matrix = sentence_position_index_matrix - sentence_position_index_matrix.transpose(0,2)  + length -1 
         ###(length, batch_size, length)
-        sentence_position_index_matrix = sentence_position_index_matrix.view(length, batch_size, 1, length).repeat([1,1,num_heads,1])
+        sentence_position_index_matrix = sentence_position_index_matrix.view(length, batch_size, 1, length).repeat([1,1,self.num_heads,1])
         ###(length, batch_size, num_heads, length)
         tmp_x = torch.gather(x, 3, sentence_position_index_matrix)
         res = tmp_x.transpose(0,1).transpose(1,2).view(bsz_heads, length,length)
