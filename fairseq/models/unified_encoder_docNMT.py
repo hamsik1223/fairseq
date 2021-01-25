@@ -516,7 +516,7 @@ class FlatTransformerEncoder(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         x, encoder_embedding, src_tokens_start, src_tokens_end  = self.forward_embedding(src_tokens)
-        src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
+        # src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
         
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -531,25 +531,25 @@ class FlatTransformerEncoder(FairseqEncoder):
         # encoder layers. for bottom layers
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
-            x = layer(x, encoder_padding_mask, sentence_position = src_tokens_sentence_level)
+            x = layer(x, encoder_padding_mask, sentence_position = None)
             if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x)
         # mask the context sentences 
+        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)       
         ###based on the src_tokens, produce the source sentence's indexes
-        if not self.use_relative_pos_embeddings:
-            encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
+        # if not self.use_relative_pos_embeddings:
+        #     encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
         # encoder layers, for top layers
         for top_layer in range(self.top_layers):
             layer = self.layers[self.bot_layers + top_layer]
-            x = layer(x, encoder_padding_mask, sentence_position = src_tokens_sentence_level)
+            x = layer(x, encoder_padding_mask, sentence_position = None)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
-        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)       
         return EncoderOut(
             encoder_out=x,  # T x B x C
             encoder_padding_mask=encoder_padding_mask,  # B x T
