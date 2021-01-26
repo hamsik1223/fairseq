@@ -211,12 +211,13 @@ class FlatTransformer_SE_Model(FairseqEncoderDecoderModel):
         src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
         #src_dict is the fairseq.data.dictionary.Dictionary type
         if args.share_all_embeddings:
-            if src_dict != tgt_dict:
-                raise ValueError("--share-all-embeddings requires a joined dictionary")
-            if args.encoder_embed_dim != args.decoder_embed_dim:
-                raise ValueError(
-                    "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
-                )
+            ###
+            # if src_dict != tgt_dict:
+            #     raise ValueError("--share-all-embeddings requires a joined dictionary")
+            # if args.encoder_embed_dim != args.decoder_embed_dim:
+            #     raise ValueError(
+            #         "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
+            #     )
             if args.decoder_embed_path and (
                 args.decoder_embed_path != args.encoder_embed_path
             ):
@@ -497,7 +498,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
     ###
     def forward_embedding_sentences(self, src_sentences, embed_sentences):
         # embed sentence tokens and positions
-        x = embed = self.embed_scale * embed_sentences(src_sentences)
+        x = embed = embed_sentences(src_sentences)
         if self.embed_sentence_positions is not None:
             x = embed + self.embed_sentence_positions(src_sentences)
         ###add segment embedding for the sentence embeddings 
