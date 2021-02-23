@@ -35,8 +35,8 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
-@register_model("flat_transformer_with_senemb_FI")
-class FlatTransformer_SE_Model_FI(FairseqEncoderDecoderModel):
+@register_model("flat_transformer_with_senemb")
+class FlatTransformer_SE_Model(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
@@ -1082,7 +1082,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("flat_transformer_with_senemb_FI", "flat_transformer_with_senemb_FI")
+@register_model_architecture("flat_transformer_with_senemb", "flat_transformer_with_senemb")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
