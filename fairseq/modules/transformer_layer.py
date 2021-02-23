@@ -90,8 +90,14 @@ class TransformerEncoderLayer(nn.Module):
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
 
-    def forward(self, x, encoder_padding_mask, attn_mask: Optional[Tensor] = None, 
-                sentence_position = None):
+    def forward(
+        self,
+        x,
+        encoder_padding_mask,
+        attn_mask: Optional[Tensor] = None,
+        need_attn: bool = False,
+        need_head_weights: bool = False,
+        sentence_position = None):
                 ###
         """
         Args:
@@ -104,7 +110,9 @@ class TransformerEncoderLayer(nn.Module):
             attn_mask[t_tgt, t_src] = 1 means when calculating embedding
             for t_tgt, t_src is excluded (or masked out), =0 means it is
             included in attention
-
+            need_attn (bool, optional): return attention weights.
+            need_head_weights (bool, optional): return attention weights
+                for each head (default: return average over heads).
         Returns:
             encoded output of shape `(seq_len, batch, embed_dim)`
         """
@@ -113,6 +121,9 @@ class TransformerEncoderLayer(nn.Module):
             x = self.self_attn_layer_norm(x)
         if attn_mask is not None:
             attn_mask = attn_mask.masked_fill(attn_mask.to(torch.bool), -1e8)
+        if need_head_weights:
+            need_attn = True
+
         # anything in original attn_mask = 1, becomes -1e8
         # anything in original attn_mask = 0, becomes 0
         # Note that we cannot use -inf here, because at some edge cases,
@@ -121,14 +132,16 @@ class TransformerEncoderLayer(nn.Module):
         # TODO: to formally solve this problem, we need to change fairseq's
         # MultiheadAttention. We will do this later on.
 
-        x, _ = self.self_attn(
+        x, attn = self.self_attn(
             query=x,
             key=x,
             value=x,
             key_padding_mask=encoder_padding_mask,
             need_weights=False,
             attn_mask=attn_mask,
-            sentence_position = sentence_position
+            sentence_position = sentence_position,
+            need_weights=need_attn,
+            need_head_weights=need_head_weights,
         )
         ###
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -147,7 +160,9 @@ class TransformerEncoderLayer(nn.Module):
         x = residual + x
         if not self.normalize_before:
             x = self.final_layer_norm(x)
-        return x
+        if need_attn:
+            return x, attn
+        return x, None
 
 
 class TransformerDecoderLayer(nn.Module):

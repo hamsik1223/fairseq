@@ -35,8 +35,8 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
-@register_model("flat_transformer_with_senemb")
-class FlatTransformer_SE_Model(FairseqEncoderDecoderModel):
+@register_model("flat_transformer_with_senemb_FI")
+class FlatTransformer_SE_Model_FI(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
@@ -320,6 +320,7 @@ class FlatTransformer_SE_Model(FairseqEncoderDecoderModel):
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
         )
+        print(1111111)
         return decoder_out
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
@@ -587,25 +588,30 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
         encoder_sen_padding_mask = src_sentences.eq(self.padding_idx)
         
         encoder_states = [] if return_all_hiddens else None
+        encoder_attns = [] if return_all_hiddens else None
         
         ### new: split the encoders into 2 phase, bot and top, \
         ### with different mask 
         # for bottom layers
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
-            x_sen = layer(x_sen, encoder_sen_padding_mask)
+            x_sen, attn = layer(x_sen, encoder_sen_padding_mask, need_attn = True)
             if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x_sen)
+                assert encoder_attns is not None
+                encoder_attns.append(attn)
         # for top layers
         x, encoder_padding_mask = self.bot_to_top_prepare(x_sen, src_sentences, x, src_tokens, encoder_padding_mask)
         # encoder layers, for top layers
         for top_layer in range(self.top_layers):
             layer = self.layers[self.bot_layers + top_layer]
-            x = layer(x, encoder_padding_mask)
+            x, attn = layer(x, encoder_padding_mask, need_attn = True)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
+                assert encoder_attns is not None
+                encoder_attns.append(attn)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -616,6 +622,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=None,
             src_lengths=None,
+            encoder_attn=encoder_attns
         )
 
     @torch.jit.export
@@ -965,7 +972,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
 
-        return x, {"attn": [attn], "inner_states": inner_states}
+        return x, {"attn": [attn], "inner_states": inner_states, "encoder_out": encoder_out}
 
     def output_layer(self, features):
         """Project features to the vocabulary size."""
@@ -1075,7 +1082,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("flat_transformer_with_senemb", "flat_transformer_with_senemb")
+@register_model_architecture("flat_transformer_with_senemb_FI", "flat_transformer_with_senemb_FI")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
