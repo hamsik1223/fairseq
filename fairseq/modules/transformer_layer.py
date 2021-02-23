@@ -137,10 +137,9 @@ class TransformerEncoderLayer(nn.Module):
             key=x,
             value=x,
             key_padding_mask=encoder_padding_mask,
-            need_weights=False,
             attn_mask=attn_mask,
             sentence_position = sentence_position,
-            need_weights=need_attn,
+            need_weights=True,
             need_head_weights=need_head_weights,
         )
         ###
