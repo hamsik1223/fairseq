@@ -35,8 +35,8 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
-@register_model("flat_transformer_with_senemb_v005")
-class FlatTransformer_SE_Model_v005(FairseqEncoderDecoderModel):
+@register_model("flat_transformer_with_senemb_v002_maskbot")
+class FlatTransformer_SE_Model_v002_maskbot(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
@@ -726,7 +726,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
         
         encoder_states = [] if return_all_hiddens else None
         encoder_attns = [] if return_all_hiddens else None
-        
+
         ### new: split the encoders into 2 phase, bot and top, \
         ### with different mask 
         # for bottom layers
@@ -734,32 +734,32 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
         
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
-            x_and_sen, attn = layer(x_and_sen, encoder_padding_mask, sentence_position = None, 
+            x_and_sen, attn= layer(x_and_sen, encoder_padding_mask, sentence_position = None, 
                               attn_mask = attn_mask, need_attn = True)
             if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x_and_sen)
                 assert encoder_attns is not None
                 encoder_attns.append(attn)
-        x_global, _ = self.bot_to_top_prepare_ver002_only_get_src_tokens_part(x_and_sen, src_tokens, src_tokens_original)
+        x, encoder_padding_mask = self.bot_to_top_prepare_ver002_only_get_src_tokens_part(x_and_sen, src_tokens, src_tokens_original)
         # for top layers
         ###--ver0.04
         if self.layer_norm is not None:
-            x_global = self.layer_norm(x_global)
-        x, encoder_padding_mask = self.recombine_x_local_and_global(x, x_global, src_tokens)
+            x = self.layer_norm(x)
+        # x, encoder_padding_mask = self.recombine_x_local_and_global(x, x_global, src_tokens)
         ###--ver0.04
         # encoder layers, for top layers
         if self.top_layers>0:
             for top_layer in range(self.top_layers):
                 layer = self.layers[self.bot_layers + top_layer]
-                x = layer(x, encoder_padding_mask)
+                x = layer(x, encoder_padding_mask, need_attn = True)
                 if return_all_hiddens:
                     assert encoder_states is not None
                     encoder_states.append(x)
                     assert encoder_attns is not None
                     encoder_attns.append(attn)
 
-        x, encoder_padding_mask = self.bot_to_top_prepare_ver002_only_get_src_tokens_part(x, src_tokens, src_tokens_original)
+        # x, encoder_padding_mask = self.bot_to_top_prepare_ver002_only_get_src_tokens_part(x, src_tokens, src_tokens_original)
         
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -1239,7 +1239,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("flat_transformer_with_senemb_v005", "flat_transformer_with_senemb_v005")
+@register_model_architecture("flat_transformer_with_senemb_v002_maskbot", "flat_transformer_with_senemb_v002_maskbot")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
