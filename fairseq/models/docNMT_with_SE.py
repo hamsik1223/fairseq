@@ -320,7 +320,6 @@ class FlatTransformer_SE_Model(FairseqEncoderDecoderModel):
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
         )
-        print(1111111)
         return decoder_out
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
@@ -971,7 +970,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
-
+        ######for print the encoder out 
         return x, {"attn": [attn], "inner_states": inner_states, "encoder_out": encoder_out}
 
     def output_layer(self, features):
