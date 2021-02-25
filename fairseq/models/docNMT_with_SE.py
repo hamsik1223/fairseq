@@ -673,6 +673,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=src_tokens,  # B x T
             src_lengths=src_lengths,  # B x 1
+            encoder_attn=[]
         )
 
     def max_positions(self):

@@ -525,16 +525,20 @@ class FlatTransformerEncoder(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
         encoder_states = [] if return_all_hiddens else None
+        encoder_attns = [] if return_all_hiddens else None
         
         ### new: split the encoders into 2 phase, bot and top, \
         ### with different mask 
         # encoder layers. for bottom layers
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
-            x = layer(x, encoder_padding_mask, sentence_position = None)
+            x, attn = layer(x, encoder_padding_mask, sentence_position = None,
+                            need_attn=True)
             if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x)
+                assert encoder_attns is not None
+                encoder_attns.append(attn)
         # mask the context sentences 
         encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)       
         ###based on the src_tokens, produce the source sentence's indexes
@@ -547,6 +551,8 @@ class FlatTransformerEncoder(FairseqEncoder):
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
+                assert encoder_attns is not None
+                encoder_attns.append(attn)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -557,6 +563,7 @@ class FlatTransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=None,
             src_lengths=None,
+            encoder_attn=encoder_attns
         )
 
     @torch.jit.export
@@ -608,6 +615,7 @@ class FlatTransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=src_tokens,  # B x T
             src_lengths=src_lengths,  # B x 1
+            encoder_attn=encoder_attns
         )
 
     def max_positions(self):
@@ -906,7 +914,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
 
-        return x, {"attn": [attn], "inner_states": inner_states}
+        return x, {"attn": [attn], "inner_states": inner_states, "encoder_out": encoder_out}
 
     def output_layer(self, features):
         """Project features to the vocabulary size."""

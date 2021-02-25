@@ -752,7 +752,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
         if self.top_layers>0:
             for top_layer in range(self.top_layers):
                 layer = self.layers[self.bot_layers + top_layer]
-                x, attn = layer(x, encoder_padding_mask)
+                x, attn = layer(x, encoder_padding_mask, need_attn = True)
                 if return_all_hiddens:
                     assert encoder_states is not None
                     encoder_states.append(x)
@@ -1121,7 +1121,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
 
-        return x, {"attn": [attn], "inner_states": inner_states}
+        return x, {"attn": [attn], "inner_states": inner_states, "encoder_out": encoder_out}
 
     def output_layer(self, features):
         """Project features to the vocabulary size."""
