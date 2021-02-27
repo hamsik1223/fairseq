@@ -97,8 +97,10 @@ class TransformerEncoderLayer(nn.Module):
         attn_mask: Optional[Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
-        sentence_position = None):
-                ###
+        sentence_position = None,
+        disable_add_1stblock = False,
+        only_weighted_sum = False):
+                #####
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -144,9 +146,13 @@ class TransformerEncoderLayer(nn.Module):
         )
         ###
         x = F.dropout(x, p=self.dropout, training=self.training)
-        x = residual + x
+        #####
+        if not disable_add_1stblock:       
+            x = residual + x
         if not self.normalize_before:
             x = self.self_attn_layer_norm(x)
+        if only_weighted_sum:
+            return x
 
         residual = x
         if self.normalize_before:
