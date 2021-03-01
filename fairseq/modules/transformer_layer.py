@@ -152,7 +152,10 @@ class TransformerEncoderLayer(nn.Module):
         if not self.normalize_before:
             x = self.self_attn_layer_norm(x)
         if only_weighted_sum:
-            return x
+            if need_attn:
+                return x, attn
+            else:     
+                return x, None
 
         residual = x
         if self.normalize_before:

@@ -421,13 +421,15 @@ class TransformerEncoder(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
         encoder_states = [] if return_all_hiddens else None
-
+        encoder_attn = [] if return_all_hiddens else None
         # encoder layers
         for layer in self.layers:
-            x = layer(x, encoder_padding_mask)
+            x, _ = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
+                assert encoder_attn is not None
+                encoder_attn.append(_)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -439,6 +441,7 @@ class TransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=None,
             src_lengths=None,
+            encoder_attn=encoder_attn
         )
 
     @torch.jit.export
@@ -490,6 +493,7 @@ class TransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=src_tokens,  # B x T
             src_lengths=src_lengths,  # B x 1
+            encoder_attn = []
         )
 
     def max_positions(self):
