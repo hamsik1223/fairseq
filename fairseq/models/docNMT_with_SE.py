@@ -595,6 +595,7 @@ class FlatTransformer_SE_Encoder(FairseqEncoder):
         for bot_layer in range(self.bot_layers):
             layer = self.layers[bot_layer]
             x_sen, attn = layer(x_sen, encoder_sen_padding_mask, need_attn = True)
+                               #disable_add_1stblock = True)
             if return_all_hiddens: 
                 assert encoder_states is not None
                 encoder_states.append(x_sen)
