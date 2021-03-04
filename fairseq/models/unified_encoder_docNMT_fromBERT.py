@@ -3,8 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import math
+import math, re
 from typing import Any, Dict, List, Optional, Tuple
+from transformers import BertModel
 
 import torch
 import torch.nn as nn
@@ -35,7 +36,7 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
-@register_model("flat_transformer")
+@register_model("flat_transformer_plusBERT")
 class FlatTransformerModel(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
@@ -90,6 +91,24 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
         super().__init__(encoder, decoder)
         self.args = args
         self.supports_align_args = True
+        pretrained_model_path = 'google/bert_uncased_L-6_H-768_A-12'
+        pretrained_model = BertModel.from_pretrained(pretrained_model_path)
+        
+        # encoder
+        loaded_state_dict = upgrade_state_dict_with_pretrained_weights(
+                    state_dict=encoder.state_dict(),
+                    pretrained_model=pretrained_model,
+                )
+        encoder.load_state_dict(loaded_state_dict, strict=True)
+
+        # decoder
+        decoder_state_dict = decoder.state_dict()
+        for k in decoder_state_dict.keys():
+            if k not in loaded_state_dict:
+                loaded_state_dict[k] = decoder_state_dict[k]
+
+        decoder.load_state_dict(loaded_state_dict, strict=True)
+
 
     @staticmethod
     def add_args(parser):
@@ -1023,71 +1042,105 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("flat_transformer", "flat_transformer")
-def base_architecture(args):
-    args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
-    #args.encoder_layers = getattr(args, "encoder_layers", 6)
-    args.encoder_bot_layers = getattr(args, "encoder_bot_layers", 1)
-    args.encoder_top_layers = getattr(args, "encoder_top_layers", 5)
-    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
-    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
-    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", False)
-    args.decoder_embed_path = getattr(args, "decoder_embed_path", None)
-    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", args.encoder_embed_dim)
-    args.decoder_ffn_embed_dim = getattr(
-        args, "decoder_ffn_embed_dim", args.encoder_ffn_embed_dim
-    )
-    args.decoder_layers = getattr(args, "decoder_layers", 6)
-    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
-    args.decoder_normalize_before = getattr(args, "decoder_normalize_before", False)
-    args.decoder_learned_pos = getattr(args, "decoder_learned_pos", False)
-    args.attention_dropout = getattr(args, "attention_dropout", 0.0)
-    args.activation_dropout = getattr(args, "activation_dropout", 0.0)
-    args.activation_fn = getattr(args, "activation_fn", "relu")
-    args.dropout = getattr(args, "dropout", 0.1)
-    args.adaptive_softmax_cutoff = getattr(args, "adaptive_softmax_cutoff", None)
-    args.adaptive_softmax_dropout = getattr(args, "adaptive_softmax_dropout", 0)
-    args.share_decoder_input_output_embed = getattr(
-        args, "share_decoder_input_output_embed", False
-    )
-    args.share_all_embeddings = getattr(args, "share_all_embeddings", False)
-    args.no_token_positional_embeddings = getattr(
-        args, "no_token_positional_embeddings", False
-    )
-    args.adaptive_input = getattr(args, "adaptive_input", False)
-    args.no_cross_attention = getattr(args, "no_cross_attention", False)
-    args.cross_self_attention = getattr(args, "cross_self_attention", False)
+def upgrade_state_dict_with_pretrained_weights(
+    state_dict: Dict[str, Any], pretrained_model: BertModel, 
+) -> Dict[str, Any]:
 
-    args.decoder_output_dim = getattr(
-        args, "decoder_output_dim", args.decoder_embed_dim
-    )
-    args.decoder_input_dim = getattr(args, "decoder_input_dim", args.decoder_embed_dim)
 
-    args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
-    args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
-    args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
-    args.checkpoint_activations = getattr(args, "checkpoint_activations", False)
+    pretrained_state_dict = pretrained_model.state_dict()
 
-    args.encoder_layers_to_keep = getattr(args, "encoder_layers_to_keep", None)
-    args.decoder_layers_to_keep = getattr(args, "decoder_layers_to_keep", None)
-    args.encoder_layerdrop = getattr(args, "encoder_layerdrop", 0)
-    args.decoder_layerdrop = getattr(args, "decoder_layerdrop", 0)
-    args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
-    args.quant_noise_pq_block_size = getattr(args, "quant_noise_pq_block_size", 8)
-    args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
+    embed_ln = re.compile("LayerNorm\.(weight|bias)")
+    self_attn = re.compile(r"layer\.(\d+)\.+attention.+((q)uery|(k)ey|(v)alue|(out)put\.dense|(output)\.LayerNorm)\.(weight|bias)")
+    ffns = re.compile(r"layer\.(\d+)\.(intermediate|output)\.dense\.(weight|bias)")
+    ffns_ln_p = re.compile(r"layer\.(\d+)\.output\.LayerNorm\.(weight|bias)")
+        
 
-@register_model_architecture("flat_transformer", "flat_transformer_rel_senpos_embeddings")
-def flat_transformer_rel_senpos_embeddings(args):
-    args.use_relative_pos_embeddings = getattr(args, "use_relative_pos_embeddings", True)
-    base_architecture(args)
+    for key in pretrained_state_dict.keys():
+        # print(key)
+        if "embeddings" in key:
+            if "word" in key:
+                new_key = "embed_tokens.weight"
+            elif "position" in key:
+                new_key = 'embed_positions._float_tensor'
+                #new_key = 'embed_positions.weight'
+            elif "type" in key:
+                new_key = None
+            else:
+                fs_embed_ln = "layernorm_embedding.{}"
+                new_key = fs_embed_ln.format(embed_ln.search(key).group(1))
+        elif "attention" in key:
+            # print(k)
+            groups = self_attn.search(key).groups()
+            fs_self_attn = "layers.{}.self_attn.{}_proj.{}"
+            fs_self_attn_ln = "layers.{}.self_attn_layer_norm.{}"
+            if "query" in key:
+                # print(fs_self_attn.format(groups[0], groups[2], groups[-1]))
+                new_key = fs_self_attn.format(groups[0], groups[2], groups[-1])
+            elif "key" in key:
+                # print(fs_self_attn.format(groups[0], groups[3], groups[-1]))
+                new_key = fs_self_attn.format(groups[0], groups[3], groups[-1])
+            elif "value" in key:
+                # print(fs_self_attn.format(groups[0], groups[4], groups[-1]))
+                new_key = fs_self_attn.format(groups[0], groups[4], groups[-1])
+            elif "output.dense" in key:
+                # print(fs_self_attn.format(groups[0], groups[5], groups[-1]))
+                new_key = fs_self_attn.format(groups[0], groups[5], groups[-1])
+            else:
+                # print(fs_self_attn_ln.format(groups[0], groups[-1]))
+                new_key = fs_self_attn_ln.format(groups[0], groups[-1])
+        elif "dense" in key and "pooler" not in key:
+            groups = ffns.search(key).groups()
+            # print(groups)
+            ffns_f1 = "layers.{}.fc1.{}"
+            ffns_f2 = "layers.{}.fc2.{}"
+            if "intermediate" in key:
+                # print(ffns_f1.format(groups[0], groups[-1]))
+                new_key = ffns_f1.format(groups[0], groups[-1])
+            else:
+                # print(ffns_f2.format(groups[0], groups[-1]))
+                new_key = ffns_f2.format(groups[0], groups[-1])
+        elif "LayerNorm" in key:
+            # print(key)
+            groups = ffns_ln_p.search(key).groups()
+            ffns_ln = "layers.{}.final_layer_norm.{}"
+            # print(groups)
+            # print(ffns_ln.format(groups[0], groups[-1]))
+            new_key = ffns_ln.format(groups[0], groups[-1])
+        else:
+            new_key = None
+            
+        print(key, new_key)
+        print(state_dict[new_key].shape, pretrained_state_dict[key].shape)
+        print(state_dict[new_key], pretrained_state_dict[key])
+        if new_key is not None:
+            # print(model[key].shape)
+            # print(new_key, key)
+            # print(state_dict[new_key].shape, pretrained_state_dict[key].shape)
+            assert new_key in state_dict, (
+                "{} Transformer encoder / decoder "
+                "state_dict does not contain {}. Cannot "
+                "load {} from pretrained XLM checkpoint "
+                "{} into Transformer.".format(
+                    str(state_dict.keys()),
+                    new_key, key, pretrained_state_dict)
+                )
 
-@register_model_architecture("flat_transformer", "flat_transformer_large")
+            if new_key == "embed_tokens.weight":
+                size = pretrained_state_dict[key].size(0)
+                state_dict[new_key][:size] = pretrained_state_dict[key]
+            else:
+                assert state_dict[new_key].shape == pretrained_state_dict[key].shape
+                state_dict[new_key] = pretrained_state_dict[key]
+
+    return state_dict
+
+
+@register_model_architecture("flat_transformer_plusBERT", "flat_transformer_plusBERT")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 768)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 3072)
+    #args.encoder_layers = getattr(args, "encoder_layers", 6)
     args.encoder_bot_layers = getattr(args, "encoder_bot_layers", 1)
     args.encoder_top_layers = getattr(args, "encoder_top_layers", 5)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 12)
