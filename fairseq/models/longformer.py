@@ -26,8 +26,8 @@ from fairseq.modules import (
     SinusoidalPositionalEmbedding,
     TransformerDecoderLayer,
     TransformerEncoderLayer,
-    LongformerEncoderLayer
 )
+from fairseq.modules.longformer_layer import LongformerEncoderLayer
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
 
@@ -184,7 +184,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='Add relative positional embeddings to values (apart from keys)')
         # fmt: on
         # args for longformer
-        parser.add_argument('--attention-mode', default='sliding_chunks',
+        parser.add_argument('--attention-mode', default='tvm',
                             help='')
         parser.add_argument('--attention-window', default=[512]*6,
                             help='')
@@ -434,7 +434,7 @@ class TransformerEncoder(FairseqEncoder):
         encoder_attn = [] if return_all_hiddens else None
         # encoder layers
         for layer in self.layers:
-            x, _ = layer(x, encoder_padding_mask)
+            x = layer(x)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
@@ -948,7 +948,7 @@ def base_architecture(args):
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
 
-    args.attention_mode = getattr(args, "attention_mode", 'sliding_chunks')
+    args.attention_mode = getattr(args, "attention_mode", 'tvm')
     args.attention_window = getattr(args, "attention_window", [512]*6)
     args.attention_dilation = getattr(args, "attention_dilation", [2]*6)
     args.autoregressive = getattr(args, "autoregressive", False)
