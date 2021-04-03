@@ -392,6 +392,32 @@ class TransformerEncoder(FairseqEncoder):
         res = torch.cat([src_tokens, padded_tensor.long()], axis = 1)
         return res
 
+    def find_split_of_source_and_context(self, src_tokens):
+        #looking for split index of the source in the input instance
+        #there is only one <s> as the start (src_tokens_0), 
+        #and the </s> after that <s> is the end 
+        B=src_tokens.size()[0]
+        src_tokens_start = torch.where(src_tokens==0)[1]
+        src_tokens_end_tuple = torch.where(src_tokens==2) 
+        src_tokens_end_sen_index = src_tokens_end_tuple[0]
+        src_tokens_end_index = src_tokens_end_tuple[1]
+        src_tokens_end = torch.zeros(src_tokens_start.size())
+        for i in range(B):
+            src_tokens_end_cur = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
+            src_tokens_end[i] = src_tokens_end_cur[torch.where(src_tokens_end_cur > src_tokens_start[i])[0][0]]
+        return src_tokens_start, src_tokens_end.int(), src_tokens_end_tuple
+
+
+    def build_source_sentence_mask(self, src_tokens, src_tokens_start, src_tokens_end):
+        _device = src_tokens.device
+        B=src_tokens.size()[0]
+        encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
+        for i in range(B):
+            encoder_padding_mask[i, (1+src_tokens_start[i]): (1+src_tokens_end[i])] = 1
+        encoder_padding_mask = encoder_padding_mask < 0.5
+        return encoder_padding_mask
+
+
     def forward_embedding(self, src_tokens):
         # embed tokens and positions
         x = embed = self.embed_scale * self.embed_tokens(src_tokens)
@@ -431,6 +457,10 @@ class TransformerEncoder(FairseqEncoder):
                   hidden states of shape `(src_len, batch, embed_dim)`.
                   Only populated if *return_all_hiddens* is True.
         """
+        ## first find the start and end of the src sentence  
+        src_tokens_start, src_tokens_end, _ = self.find_split_of_source_and_context(src_tokens)
+        seqlen = src_tokens.size()[1]
+
         max_window_size = max(self.attention_window)
 
         ##padding the input x with seqlen of 2*w's multiple, 
@@ -453,6 +483,10 @@ class TransformerEncoder(FairseqEncoder):
                 encoder_states.append(x)
                 assert encoder_attn is not None
                 encoder_attn.append(_)
+
+        ##only get the unpadded parts...
+        x = x[:, 0:seqlen, :]
+        encoder_padding_mask = self.build_source_sentence_mask(src_tokens[:, 0:seqlen], src_tokens_start, src_tokens_end)
 
         x = x.transpose(0, 1)
         if self.layer_norm is not None:
