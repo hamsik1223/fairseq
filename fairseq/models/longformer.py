@@ -184,11 +184,11 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='Add relative positional embeddings to values (apart from keys)')
         # fmt: on
         # args for longformer
-        parser.add_argument('--attention-mode', default='tvm',
+        parser.add_argument('--attention-mode', default='sliding_chunks',
                             help='')
-        parser.add_argument('--attention-window', default=[512]*6,
+        parser.add_argument('--attention-window', default=[32]*6,
                             help='')
-        parser.add_argument('--attention-dilation', default=[2]*6,
+        parser.add_argument('--attention-dilation', default=[1]*6,
                             help='')
         parser.add_argument('--autoregressive', default= False,
                             help='')
@@ -370,6 +370,7 @@ class TransformerEncoder(FairseqEncoder):
             for i in range(args.encoder_layers)
         ])
         self.num_layers = len(self.layers)
+        self.attention_window = args.attention_window
 
         if args.encoder_normalize_before:
             self.layer_norm = LayerNorm(embed_dim)
@@ -382,6 +383,14 @@ class TransformerEncoder(FairseqEncoder):
 
     def build_encoder_layer(self, args, layer_id):
         return LongformerEncoderLayer(args, layer_id)
+
+    def padding_src_tokens(self, src_tokens, _w):
+        _device = src_tokens.device
+        src_seqlen = src_tokens.size()[1]
+        padded_src_seqlen = (int(src_seqlen//_w) + 1) * _w - src_seqlen
+        padded_tensor = torch.zeros([src_tokens.size()[0],padded_src_seqlen], device = _device) + self.padding_idx
+        res = torch.cat([src_tokens, padded_tensor.long()], axis = 1)
+        return res
 
     def forward_embedding(self, src_tokens):
         # embed tokens and positions
@@ -422,10 +431,14 @@ class TransformerEncoder(FairseqEncoder):
                   hidden states of shape `(src_len, batch, embed_dim)`.
                   Only populated if *return_all_hiddens* is True.
         """
-        x, encoder_embedding = self.forward_embedding(src_tokens)
+        max_window_size = max(self.attention_window)
 
+        ##padding the input x with seqlen of 2*w's multiple, 
+        ##e.g. if w=32, let the seqlen to be 64's multiple.
+        src_tokens = self.padding_src_tokens(src_tokens, 2*max_window_size)
+        x, encoder_embedding = self.forward_embedding(src_tokens)
         # B x T x C -> T x B x C
-        x = x.transpose(0, 1)
+        #x = x.transpose(0, 1)
 
         # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
@@ -433,14 +446,15 @@ class TransformerEncoder(FairseqEncoder):
         encoder_states = [] if return_all_hiddens else None
         encoder_attn = [] if return_all_hiddens else None
         # encoder layers
-        for layer in self.layers:
-            x = layer(x)
+        for i, layer in enumerate(self.layers):
+            x, _ = layer(x, output_attentions = True)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
                 assert encoder_attn is not None
                 encoder_attn.append(_)
 
+        x = x.transpose(0, 1)
         if self.layer_norm is not None:
             x = self.layer_norm(x)
 
