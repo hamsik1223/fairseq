@@ -996,7 +996,7 @@ def base_architecture(args):
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
 
-    args.attention_mode = getattr(args, "attention_mode", 'tvm')
-    args.attention_window = getattr(args, "attention_window", [512]*6)
-    args.attention_dilation = getattr(args, "attention_dilation", [2]*6)
+    args.attention_mode = getattr(args, "attention_mode", 'sliding_chunks')
+    args.attention_window = getattr(args, "attention_window", [32]*6)
+    args.attention_dilation = getattr(args, "attention_dilation", [1]*6)
     args.autoregressive = getattr(args, "autoregressive", False)
