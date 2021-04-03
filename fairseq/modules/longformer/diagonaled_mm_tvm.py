@@ -21,8 +21,8 @@ class DiagonaledMM(torch.autograd.Function):
         b0, b1, b2: size of tensor tiles. Very important for good performance
 
         '''
-        import tvm  # import the full tvm library here for compilation. Don't import at the top of the file in case we don't need to compile
-        from tvm.contrib import nvcc
+        import fairseq.modules.longformer.tvm  # import the full tvm library here for compilation. Don't import at the top of the file in case we don't need to compile
+        from fairseq.modules.longformer.tvm.contrib import nvcc
         @tvm.register_func
         def tvm_callback_cuda_compile(code):
             """Use nvcc compiler for better perf."""
@@ -123,7 +123,7 @@ class DiagonaledMM(torch.autograd.Function):
 
     @staticmethod
     def _load_compiled_function(dtype: str, device: str):
-        from tvm.module import load  # this can be the small runtime python library, and doesn't need to be the whole thing
+        from fairseq.modules.longformer.tvm.module import load  # this can be the small runtime python library, and doesn't need to be the whole thing
         filename = DiagonaledMM._get_lib_filename(dtype, device)
         current_dir = os.path.dirname(os.path.abspath(__file__))
         potential_dirs = ['../../', '../', './', f'{current_dir}/', f'{current_dir}/../']
@@ -146,7 +146,7 @@ class DiagonaledMM(torch.autograd.Function):
                 diagonaled_mm = DiagonaledMM._compile_function(dtype, device)  # compile
                 DiagonaledMM._save_compiled_function(diagonaled_mm, dtype, device)  # save to disk
             # convert the tvm function into a pytorch function
-            from tvm.contrib import dlpack
+            from fairseq.modules.longformer.tvm.contrib import dlpack
             diagonaled_mm_pytorch = dlpack.to_pytorch_func(diagonaled_mm)  # wrap it as a pytorch function
             # save the function into a dictionary to be reused
             DiagonaledMM.function_dict[args] = diagonaled_mm_pytorch  # save it in a dictionary for next time
