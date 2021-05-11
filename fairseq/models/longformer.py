@@ -186,7 +186,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         # args for longformer
         parser.add_argument('--attention-mode', default='sliding_chunks',
                             help='')
-        parser.add_argument('--attention-window', default=[72]*2 + [36]*2 + [18]*2,
+        parser.add_argument('--attention-window', default=[16, 16, 16, 32, 64, 64], 
                             help='')
         parser.add_argument('--attention-dilation', default=[1]*6,
                             help='')

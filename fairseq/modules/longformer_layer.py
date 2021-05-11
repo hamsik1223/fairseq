@@ -106,12 +106,18 @@ class LongformerEncoderLayer(nn.Module):
             -ve: no attention
               0: local attention
             +ve: global attention
+        params: 
+            attention_mask Tensor[bsz, seq], 
+                use 1 to indicate the global token (if need)
+                use -1 to indicate the padding mask
+                use 0 to indicate the local window.
+
         '''
         assert encoder_hidden_states is None, "`encoder_hidden_states` is not supported and should be None"
         assert encoder_attention_mask is None, "`encoder_attention_mask` is not supported and shiould be None"
 
         if attention_mask is not None:
-            attention_mask = attention_mask.squeeze(dim=2).squeeze(dim=1)
+            #attention_mask = attention_mask.squeeze(dim=2).squeeze(dim=1)
             key_padding_mask = attention_mask < 0
             extra_attention_mask = attention_mask > 0
             remove_from_windowed_attention_mask = attention_mask != 0
