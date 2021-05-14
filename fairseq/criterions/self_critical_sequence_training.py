@@ -4,7 +4,7 @@ from fairseq.data import encoders
 from fairseq import bleu
 from fairseq.criterions import FairseqCriterion, register_criterion
 
-from fairseq.modules.generator import SimpleSequenceGenerator
+from fairseq.modules.scst.generator import SimpleSequenceGenerator
 
 
 @register_criterion('self_critical_sequence_training')
