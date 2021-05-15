@@ -11,8 +11,8 @@ from fairseq.modules.scst.generator import SimpleSequenceGenerator
 class SelfCriticalSequenceTrainingCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
-        super().__init__(args, task)
-        self.task = task
+        super().__init__(task = task)
+        self.args = args
 
         self.generator = SimpleSequenceGenerator(beam=args.scst_beam,
                                                  penalty=args.scst_penalty,
@@ -112,3 +112,8 @@ class SelfCriticalSequenceTrainingCriterion(FairseqCriterion):
             'nsentences': sum(log.get('nsentences', 0) for log in logging_outputs),
             'sample_size': sum(log.get('sample_size', 0) for log in logging_outputs)
         }
+
+    @classmethod
+    def build_criterion(cls, args, task):
+        """Construct a criterion from command-line args."""
+        return cls(args, task)
