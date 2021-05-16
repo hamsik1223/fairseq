@@ -502,6 +502,14 @@ class Trainer(object):
                 self._log_oom(e)
                 logger.error("OOM during optimization, irrecoverable")
             raise e
+        ####modified parts 
+        except ZeroDivisionError as e:
+            overflow = True
+            logger.info("NOTE: overflow detected, " + str(e))
+            grad_norm = torch.tensor(0.).cuda()
+            self.zero_grad()
+            return {}
+        ####
 
         # Some distributed wrappers (e.g., SlowMo) need access to the optimizer after the step
         if hasattr(self.model, 'perform_additional_optimizer_actions'):
