@@ -28,10 +28,9 @@ class SimpleSequenceGenerator:
 
         sample_features = sample['net_input']['src_tokens'].to(device=device)
         sample_length = sample['net_input']['src_lengths']
-        sample_location = sample['net_input']['src_locations'].to(device=device)
 
         tokens = torch.ones(sample_size, 1, dtype=torch.long).to(device=device) * self.eos_index
-        enc_out = model.encoder(sample_features, sample_length, sample_location)
+        enc_out = model.encoder(sample_features, sample_length)
         dec_out, extra = model.decoder(tokens, encoder_out=enc_out, incremental_state=incremental_state)
 
         lprobs = model.get_normalized_probs((dec_out, extra), log_probs=True)

@@ -22,13 +22,15 @@ class SelfCriticalSequenceTrainingCriterion(FairseqCriterion):
         # Needed for decoding model output to string
         self.conf_tokenizer = encoders.build_tokenizer(args)
         self.conf_decoder = encoders.build_bpe(args)
-        self.captions_dict = task.target_dictionary
+        self.target_dict = task.target_dictionary
 
         # Tokenizer needed for computing CIDEr scores
         self.tokenizer = encoders.build_tokenizer(args)
         self.bpe = encoders.build_bpe(args)
  
         self.scorer = bleu.SacrebleuScorer()
+
+        self.pad_idx = task.target_dictionary.pad()
 
     @staticmethod
     def add_args(parser):
@@ -38,53 +40,66 @@ class SelfCriticalSequenceTrainingCriterion(FairseqCriterion):
                             help='beam search length penalty')
         parser.add_argument('--scst-validation-set-size', type=int, default=0, metavar='N',
                             help='limited size of validation set')
+        # parser.add_argument('--bpe', type=str, default=None,
+        #                     help='bpe method for translated tokens')
 
     @property
-    def image_ids(self):
+    def get_ids(self):
         return self.task.dataset('train').img_ds.image_ids
 
+    ####TO FIX... decoder(BPE); tokenizer; 是否还需要detokenize??
     def decode(self, x):
         """Decode model output.
         """
-        x = self.captions_dict.string(x)
+        x = self.target_dict.string(x)
         x = self.conf_decoder.decode(x)
-        return self.conf_tokenizer.decode(x)
-
+        if self.conf_tokenizer is not None:
+            x = self.conf_tokenizer.decode(x)
+        return x
+    
+    # @property
+    # def get_ids(self):
+    #     print(type(self.task.dataset('train')))
+    #     print(self.task.dataset('train').keys())
+    #     print(type(self.task.dataset('train').id))
+    #     assert 0 
+    #     return self.task.dataset('train').img_ds.image_ids
 
     def generate(self, model, sample):
         """Generate captions using (simple) beam search.
         """
-        tgt_captions = dict()
-        gen_captions = dict()
+        tgt_translations = dict()
+        gen_translations = dict()
 
         scores, _, tokens, _ = self.generator.generate(model, sample)
 
         counter = 0
         for i, tb in enumerate(tokens):
-            image_id = self.image_ids[i]
-            image_captions = sample['target'][i]
-
+            # sample_id = self.get_ids[i]
+            sample_translations = self.decode(sample['target'][i])
+            ##sample_translations: a sentence of string type
             for t in tb:
                 counter += 1
                 decoded = self.decode(t)
-                tgt_captions[counter] = image_captions
-                gen_captions[counter] = [{
-                    'image_id': image_id,
-                    'caption': decoded,
-                    'id': 1
-                }]
+                tgt_translations[counter] = sample_translations
+                gen_translations[counter] = decoded
 
-        gen_captions = self.tokenizer.tokenize(gen_captions)
-        return tgt_captions, gen_captions, scores
+        # if self.tokenizer.tokenize is not None:
+        #     gen_translations = self.tokenizer.tokenize(gen_translations)
+        return tgt_translations, gen_translations, scores
 
     def forward(self, model, sample, reduce=True):
         sample_indices = sample['id']
         sample_device = sample_indices.device
 
-        tgt_captions, gen_captions, scores = self.generate(model, sample)
+        tgt_translations, gen_translations, scores = self.generate(model, sample)
 
-        _, reward = self.scorer.compute_score(tgt_captions, gen_captions)
-        reward = torch.from_numpy(reward).to(device=sample_device).view(scores.shape)
+        reward = [[self.scorer.add_string(tgt_translations[i], gen_translations[i]),
+                  self.scorer.score(), 
+                  self.scorer.reset()][1] \
+                  for i in range(1, (1+len(tgt_translations.keys())))]
+
+        reward = torch.tensor(reward).to(device=sample_device).view(scores.shape)
 
         # Mean of rewards is used as baseline rather than greedy
         # decoding (see also https://arxiv.org/abs/1912.08226).
@@ -93,8 +108,15 @@ class SelfCriticalSequenceTrainingCriterion(FairseqCriterion):
         loss = -scores * (reward - reward_baseline)
         loss = loss.mean()
 
-        sample_nsentences = sample['nsentences']
-        sample_ntokens = sample['ntokens']
+        #### TO FIX...
+        sample_nsentences = len(sample)
+
+        y = [torch.sum(sample['target'][i,]!=self.pad_idx) for i in range(len(sample['target']))]        
+        for i, _ in enumerate(y):
+            if i==0:
+                sample_ntokens = _
+            else:
+                sample_ntokens+=_
 
         logging_output = {
             'loss': loss.data,
