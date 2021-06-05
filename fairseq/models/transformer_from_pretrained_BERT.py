@@ -3,9 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import math, re
+import math
 from typing import Any, Dict, List, Optional, Tuple
-from transformers import BertModel
 
 import torch
 import torch.nn as nn
@@ -36,14 +35,14 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
-@register_model("flat_transformer_plusBERT")
-class FlatTransformerModel(FairseqEncoderDecoderModel):
+@register_model("transformer_from_pretrained_BERT")
+class TransformerModel(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
 
     Args:
-        encoder (FlatTransformerEncoder): the encoder
+        encoder (TransformerEncoder): the encoder
         decoder (TransformerDecoder): the decoder
 
     The Transformer model provides the following named architectures and
@@ -91,36 +90,6 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
         super().__init__(encoder, decoder)
         self.args = args
         self.supports_align_args = True
-        pretrained_model_path = 'google/bert_uncased_L-6_H-768_A-12'
-        pretrained_model = BertModel.from_pretrained(pretrained_model_path)
-        
-        # encoder_state_dict = encoder.state_dict()
-        # for k in encoder_state_dict.keys():
-        #     print(k)
-
-        # pretrained_state_dict = pretrained_model.state_dict()
-        # print('-'*100)
-        # print('showing the pretrained_state_dict keys......')
-        # for k in pretrained_state_dict.keys():
-        #     print(k)
-        # assert 0 
-
-        # encoder 
-        loaded_state_dict = upgrade_state_dict_with_pretrained_weights(
-                    state_dict=encoder.state_dict(),
-                    pretrained_model=pretrained_model,
-                    padding_idx=1
-                )
-        encoder.load_state_dict(loaded_state_dict, strict=True)
-
-        # decoder
-        # decoder_state_dict = decoder.state_dict()
-        # for k in decoder_state_dict.keys():
-        #     if k not in loaded_state_dict:
-        #         loaded_state_dict[k] = decoder_state_dict[k]
-
-        # decoder.load_state_dict(loaded_state_dict, strict=True)
-
 
     @staticmethod
     def add_args(parser):
@@ -141,12 +110,8 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
                             help='encoder embedding dimension')
         parser.add_argument('--encoder-ffn-embed-dim', type=int, metavar='N',
                             help='encoder embedding dimension for FFN')
-        # parser.add_argument('--encoder-layers', type=int, metavar='N',
-        #                     help='num encoder layers')
-        parser.add_argument('--encoder-bot-layers', type=int, metavar='N',
-                            help='num encoder bot layers')
-        parser.add_argument('--encoder-top-layers', type=int, metavar='N',
-                            help='num encoder top layers')
+        parser.add_argument('--encoder-layers', type=int, metavar='N',
+                            help='num encoder layers')
         parser.add_argument('--encoder-attention-heads', type=int, metavar='N',
                             help='num encoder attention heads')
         parser.add_argument('--encoder-normalize-before', action='store_true',
@@ -281,7 +246,7 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
 
     @classmethod
     def build_encoder(cls, args, src_dict, embed_tokens):
-        return FlatTransformerEncoder(args, src_dict, embed_tokens)
+        return TransformerEncoderFromBERT(args, src_dict, embed_tokens)
 
     @classmethod
     def build_decoder(cls, args, tgt_dict, embed_tokens):
@@ -340,7 +305,7 @@ class FlatTransformerModel(FairseqEncoderDecoderModel):
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
 
-class FlatTransformerEncoder(FairseqEncoder):
+class TransformerEncoderFromBERT(FairseqEncoder):
     """
     Transformer encoder consisting of *args.encoder_layers* layers. Each layer
     is a :class:`TransformerEncoderLayer`.
@@ -354,10 +319,6 @@ class FlatTransformerEncoder(FairseqEncoder):
     def __init__(self, args, dictionary, embed_tokens):
         super().__init__(dictionary)
         self.register_buffer("version", torch.Tensor([3]))
-        
-        ###new params: 
-        self.bot_layers = args.encoder_bot_layers
-        self.top_layers = args.encoder_top_layers
 
         self.dropout = args.dropout
         self.encoder_layerdrop = args.encoder_layerdrop
@@ -380,18 +341,6 @@ class FlatTransformerEncoder(FairseqEncoder):
             if not args.no_token_positional_embeddings
             else None
         )
-        ###
-        # self.embed_sentence_positions = (
-        #     PositionalEmbedding(
-        #         args.max_source_positions,
-        #         embed_dim,
-        #         padding_idx=None,
-        #         learned=True,
-        #     )
-        #     if not True
-        #     else None
-        # )
-        # self.use_relative_pos_embeddings = args.use_relative_pos_embeddings
 
         if not args.adaptive_input and args.quant_noise_pq > 0:
             self.quant_noise = apply_quant_noise_(
@@ -407,13 +356,13 @@ class FlatTransformerEncoder(FairseqEncoder):
         else:
             self.layers = nn.ModuleList([])
         self.layers.extend(
-            [self.build_encoder_layer(args) for i in range(args.encoder_bot_layers+args.encoder_top_layers)]
+            [self.build_encoder_layer(args) for i in range(args.encoder_layers)]
         )
         self.num_layers = len(self.layers)
 
         if args.encoder_normalize_before:
             self.layer_norm = nn.ModuleList([])
-            self.layer_norm.extend([LayerNorm(embed_dim) for i in range(args.encoder_bot_layers+args.encoder_top_layers)])
+            self.layer_norm.extend([LayerNorm(embed_dim) for i in range(args.encoder_layers)])
         else:
             self.layer_norm = None
         if getattr(args, "layernorm_embedding", False):
@@ -421,74 +370,6 @@ class FlatTransformerEncoder(FairseqEncoder):
         else:
             self.layernorm_embedding = None
 
-    ###new
-    def find_split_of_source_and_context(self, src_tokens):
-        #looking for split index of the source in the input instance
-        #there is only one <s> as the start (src_tokens_0), 
-        #and the </s> after that <s> is the end 
-        B=src_tokens.size()[0]
-        src_tokens_start = torch.where(src_tokens==0)[1]
-        src_tokens_end_tuple = torch.where(src_tokens==2) 
-        src_tokens_end_sen_index = src_tokens_end_tuple[0]
-        src_tokens_end_index = src_tokens_end_tuple[1]
-        src_tokens_end = torch.zeros(src_tokens_start.size())
-        for i in range(B):
-            src_tokens_end_cur = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
-            src_tokens_end[i] = src_tokens_end_cur[torch.where(src_tokens_end_cur > src_tokens_start[i])[0][0]]
-        return src_tokens_start, src_tokens_end.int(), src_tokens_end_tuple
-
-    ###new 
-    def build_source_sentence_mask(self, src_tokens, src_tokens_start, src_tokens_end):
-        _device = src_tokens.device
-        B=src_tokens.size()[0]
-        encoder_padding_mask = torch.zeros(src_tokens.size(), device = _device)
-        for i in range(B):
-            encoder_padding_mask[i, (1+src_tokens_start[i]): (1+src_tokens_end[i])] = 1
-        encoder_padding_mask = encoder_padding_mask < 0.5
-        return encoder_padding_mask
-
-    ###
-    def convert_to_sentence_emb(self, src_tokens, mode = 'relative',end_tag = 2, start_tag = 0):
-        '''
-        convert the src_token index to src_token_sentencelevel,
-        which are sentence indexes, based on end_tag and start tag
-        if mode is absolute, convert it into 
-            --current sentence is indexed as 0, 
-            --after sentences i are indexs as i*2 + padding_idx + 1
-            --previous sentences i is indexed as i*2-1 + padding_idx + 1
-            e.g. [23, 2, 0, 4, 2, 5, 2] --> [3, 3, 2, 2, 2, 4, 4]
-        if mode is relative, convert it into 
-            --current sentence --> 0 
-            --after sentence i --> i
-            --previous sentence i --> -i
-            e.g. [23, 2, 0, 4, 2, 5, 2] --> [-1, -1, 0, 0, 0, 1, 1]
-        '''
-        src_tokens_start, src_tokens_end, src_tokens_end_tuple = self.find_split_of_source_and_context(src_tokens)
-        src_tokens_end_sen_index = src_tokens_end_tuple[0]
-        src_tokens_end_index = src_tokens_end_tuple[1]
-        _device = src_tokens.device
-        B=src_tokens.size()[0]
-        src_tokens_sentence_level = torch.zeros(src_tokens.size(), device = _device)
-        for i in range(B):
-            src_tokens_end_cur = src_tokens_end[i]
-            src_tokens_end_cur_arr = src_tokens_end_index[torch.where(src_tokens_end_sen_index==i)]
-            src_tokens_end_index_before = src_tokens_end_cur_arr[torch.where(src_tokens_end_cur_arr<src_tokens_end_cur)]
-            src_tokens_end_index_before = torch.flip(src_tokens_end_index_before, [0]).tolist() + [-1]
-            src_tokens_end_index_after = [src_tokens_end_cur.tolist()] + src_tokens_end_cur_arr[torch.where(src_tokens_end_cur_arr>src_tokens_end_cur)].tolist()
-
-            if len(src_tokens_end_index_before) > 1:
-                for j, index in enumerate(src_tokens_end_index_before[:-1]):
-                    if mode=='relative':
-                        src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = -(j+1)
-                    elif mode=='absolute':
-                        src_tokens_sentence_level[i, (src_tokens_end_index_before[j+1]+1): (index+1)] = j * 2 + 1
-            if len(src_tokens_end_index_after) > 1:
-                for j, index in enumerate(src_tokens_end_index_after[:-1]):
-                    if mode=='relative':
-                        src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j+1             
-                    elif mode=='absolute':   
-                        src_tokens_sentence_level[i, (index+1):(src_tokens_end_index_after[j+1]+1)] = j * 2 + 2
-        return src_tokens_sentence_level.int().long()
 
     def build_encoder_layer(self, args):
         return TransformerEncoderLayer(args)
@@ -498,27 +379,12 @@ class FlatTransformerEncoder(FairseqEncoder):
         x = embed = self.embed_scale * self.embed_tokens(src_tokens)
         if self.embed_positions is not None:
             x = embed + self.embed_positions(src_tokens)
-        ###new added embed segments.
-        src_tokens_start, src_tokens_end, _ = self.find_split_of_source_and_context(src_tokens)      
-        sen_emb_method = 'bysegment'
-        if sen_emb_method == 'bysegment':
-            B=src_tokens.size()[0]
-            _device = x.device
-            segment_embed = torch.zeros(x.size(), device = _device, dtype = x.dtype)
-            for i in range(B):
-                segment_embed[i, (1+src_tokens_start[i]): (1+src_tokens_end[i]), :] = 1
-            x = x + segment_embed
-        else:
-            src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
-            x = x + self.embed_sentence_positions(src_tokens, positions = src_tokens_sentence_level)
-        ###
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
         if self.quant_noise is not None:
             x = self.quant_noise(x)
-        ###
-        return x, embed, src_tokens_start, src_tokens_end
+        return x, embed
 
     def forward(
         self,
@@ -547,9 +413,8 @@ class FlatTransformerEncoder(FairseqEncoder):
                   hidden states of shape `(src_len, batch, embed_dim)`.
                   Only populated if *return_all_hiddens* is True.
         """
-        x, encoder_embedding, src_tokens_start, src_tokens_end  = self.forward_embedding(src_tokens)
-        # src_tokens_sentence_level = self.convert_to_sentence_emb(src_tokens)
-        
+        x, encoder_embedding = self.forward_embedding(src_tokens)
+
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -557,41 +422,20 @@ class FlatTransformerEncoder(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
         encoder_states = [] if return_all_hiddens else None
-        encoder_attns = [] if return_all_hiddens else None
-        
-        ### new: split the encoders into 2 phase, bot and top, \
-        ### with different mask 
-        # encoder layers. for bottom layers
-        for bot_layer in range(self.bot_layers):
-            layer = self.layers[bot_layer]
-            x, attn = layer(x, encoder_padding_mask, sentence_position = None,
-                            need_attn=True)
-            if return_all_hiddens: 
-                assert encoder_states is not None
-                encoder_states.append(x)
-                assert encoder_attns is not None
-                encoder_attns.append(attn)
-            
-            if self.layer_norm is not None:
-                x = self.layer_norm[bot_layer](x)
-        # mask the context sentences 
-        encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)       
-        ###based on the src_tokens, produce the source sentence's indexes
-        # if not self.use_relative_pos_embeddings:
-        #     encoder_padding_mask = self.build_source_sentence_mask(src_tokens, src_tokens_start, src_tokens_end)
-        # encoder layers, for top layers
-        for top_layer in range(self.top_layers):
-            layer = self.layers[self.bot_layers + top_layer]
-            x, attn = layer(x, encoder_padding_mask, sentence_position = None,
-                            need_attn=True)
+        encoder_attn = [] if return_all_hiddens else None
+        # encoder layers
+        for i in range(self.num_layers):
+            layer = self.layers[i]
+            x, _ = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
                 encoder_states.append(x)
-                assert encoder_attns is not None
-                encoder_attns.append(attn)
+                assert encoder_attn is not None
+                encoder_attn.append(_)
 
             if self.layer_norm is not None:
-                x = self.layer_norm[self.bot_layers + top_layer](x)
+                x = self.layer_norm[i](x)
+
         return EncoderOut(
             encoder_out=x,  # T x B x C
             encoder_padding_mask=encoder_padding_mask,  # B x T
@@ -599,7 +443,7 @@ class FlatTransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=None,
             src_lengths=None,
-            encoder_attn=encoder_attns
+            encoder_attn=encoder_attn
         )
 
     @torch.jit.export
@@ -651,7 +495,7 @@ class FlatTransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=src_tokens,  # B x T
             src_lengths=src_lengths,  # B x 1
-            encoder_attn=[]
+            encoder_attn = []
         )
 
     def max_positions(self):
@@ -1042,12 +886,6 @@ def Embedding(num_embeddings, embedding_dim, padding_idx):
     nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
     nn.init.constant_(m.weight[padding_idx], 0)
     return m
-# def Embedding(num_embeddings, embedding_dim, padding_idx, device='cuda:0'):
-#     print('loading the word embeddings from pretrained BERT')
-#     tensor_path = '/content/Document-level-NMT/data/TED/en-de/word_embed.pt'
-#     senemb_weights = torch.load(tensor_path, map_location = device)
-#     m = nn.Embedding.from_pretrained(senemb_weights, freeze = False, padding_idx = padding_idx)
-#     return m
 
 
 def Linear(in_features, out_features, bias=True):
@@ -1058,118 +896,13 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-def upgrade_state_dict_with_pretrained_weights(
-    state_dict: Dict[str, Any], pretrained_model: BertModel, 
-    padding_idx
-) -> Dict[str, Any]:
-
-    pretrained_state_dict = pretrained_model.state_dict()
-
-    embed_ln = re.compile("LayerNorm\.(weight|bias)")
-    self_attn = re.compile(r"layer\.(\d+)\.+attention.+((q)uery|(k)ey|(v)alue|(out)put\.dense|(output)\.LayerNorm)\.(weight|bias)")
-    ffns = re.compile(r"layer\.(\d+)\.(intermediate|output)\.dense\.(weight|bias)")
-    ffns_ln_p = re.compile(r"layer\.(\d+)\.output\.LayerNorm\.(weight|bias)")
-        
-    keys_to_be_ignored = ['embeddings.position_ids',
-                          'embeddings.token_type_embeddings.weight']
-    for key in pretrained_state_dict.keys():
-        if key in keys_to_be_ignored:
-            continue 
-        # print(key)
-        elif "embeddings" in key:
-            if "word" in key:
-                new_key = "embed_tokens.weight"
-            elif "position" in key:
-                #new_key = 'embed_positions._float_tensor'
-                new_key = 'embed_positions.weight'
-            elif "type" in key:
-                new_key = None
-            else:
-                fs_embed_ln = "layernorm_embedding.{}"
-                new_key = fs_embed_ln.format(embed_ln.search(key).group(1))
-        elif "attention" in key:
-            # print(k)
-            groups = self_attn.search(key).groups()
-            fs_self_attn = "layers.{}.self_attn.{}_proj.{}"
-            fs_self_attn_ln = "layers.{}.self_attn_layer_norm.{}"
-            if "query" in key:
-                # print(fs_self_attn.format(groups[0], groups[2], groups[-1]))
-                new_key = fs_self_attn.format(groups[0], groups[2], groups[-1])
-            elif "key" in key:
-                # print(fs_self_attn.format(groups[0], groups[3], groups[-1]))
-                new_key = fs_self_attn.format(groups[0], groups[3], groups[-1])
-            elif "value" in key:
-                # print(fs_self_attn.format(groups[0], groups[4], groups[-1]))
-                new_key = fs_self_attn.format(groups[0], groups[4], groups[-1])
-            elif "output.dense" in key:
-                # print(fs_self_attn.format(groups[0], groups[5], groups[-1]))
-                new_key = fs_self_attn.format(groups[0], groups[5], groups[-1])
-            else:
-                # print(fs_self_attn_ln.format(groups[0], groups[-1]))
-                new_key = fs_self_attn_ln.format(groups[0], groups[-1])
-        elif "dense" in key and "pooler" not in key:
-            groups = ffns.search(key).groups()
-            # print(groups)
-            ffns_f1 = "layers.{}.fc1.{}"
-            ffns_f2 = "layers.{}.fc2.{}"
-            if "intermediate" in key:
-                # print(ffns_f1.format(groups[0], groups[-1]))
-                new_key = ffns_f1.format(groups[0], groups[-1])
-            else:
-                # print(ffns_f2.format(groups[0], groups[-1]))
-                new_key = ffns_f2.format(groups[0], groups[-1])
-        elif "LayerNorm" in key:
-            # print(key)
-            groups = ffns_ln_p.search(key).groups()
-            ffns_ln = "layers.{}.final_layer_norm.{}"
-            # print(groups)
-            # print(ffns_ln.format(groups[0], groups[-1]))
-            new_key = ffns_ln.format(groups[0], groups[-1])
-        else:
-            new_key = None
-        
-        #print(state_dict['embed_positions.weight'])
-        if new_key is not None:
-            print(new_key, key)
-            print(state_dict[new_key].shape, pretrained_state_dict[key].shape)
-
-        # if 'embedding' not in key:
-        #     print(pretrained_state_dict['embeddings.position_embeddings.weight'])
-        #     assert 0
-        # else:
-        #     continue        
-        #print(state_dict[new_key], pretrained_state_dict[key])
-        if new_key is not None:
-            assert new_key in state_dict, (
-                "{} Transformer encoder / decoder "
-                "state_dict does not contain {}. Cannot "
-                "load {} from pretrained XLM checkpoint "
-                "{} into Transformer.".format(
-                    str(state_dict.keys()),
-                    new_key, key, pretrained_state_dict)
-                )
-
-            if new_key == "embed_tokens.weight":
-                size = pretrained_state_dict[key].size(0)
-                state_dict[new_key][:size] = pretrained_state_dict[key]
-            elif new_key == "embed_positions.weight":
-                state_dict[new_key][(1+padding_idx):] = pretrained_state_dict[key]
-            else:
-                assert state_dict[new_key].shape == pretrained_state_dict[key].shape
-                state_dict[new_key] = pretrained_state_dict[key]
-
-    return state_dict
-
-
-@register_model_architecture("flat_transformer_plusBERT", "flat_transformer_plusBERT")
+@register_model_architecture("transformer_from_pretrained_BERT", "transformer_from_pretrained_BERT")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 768)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 3072)
-    #args.encoder_layers = getattr(args, "encoder_layers", 6)
-    args.encoder_bot_layers = getattr(args, "encoder_bot_layers", 1)
-    args.encoder_top_layers = getattr(args, "encoder_top_layers", 5)
-    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 12)
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 2048)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.encoder_learned_pos = getattr(args, "encoder_learned_pos", False)
     args.decoder_embed_path = getattr(args, "decoder_embed_path", None)
@@ -1178,7 +911,7 @@ def base_architecture(args):
         args, "decoder_ffn_embed_dim", args.encoder_ffn_embed_dim
     )
     args.decoder_layers = getattr(args, "decoder_layers", 6)
-    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 8)
     args.decoder_normalize_before = getattr(args, "decoder_normalize_before", False)
     args.decoder_learned_pos = getattr(args, "decoder_learned_pos", False)
     args.attention_dropout = getattr(args, "attention_dropout", 0.0)
@@ -1206,12 +939,4 @@ def base_architecture(args):
     args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
-    args.checkpoint_activations = getattr(args, "checkpoint_activations", False)
 
-    args.encoder_layers_to_keep = getattr(args, "encoder_layers_to_keep", None)
-    args.decoder_layers_to_keep = getattr(args, "decoder_layers_to_keep", None)
-    args.encoder_layerdrop = getattr(args, "encoder_layerdrop", 0)
-    args.decoder_layerdrop = getattr(args, "decoder_layerdrop", 0)
-    args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
-    args.quant_noise_pq_block_size = getattr(args, "quant_noise_pq_block_size", 8)
-    args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
