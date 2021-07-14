@@ -29,7 +29,7 @@ class BertBPE(object):
                 'with: pip install pytorch-transformers'
             )
 
-        if 'bpe_vocab_file' in args:
+        if args.bpe_vocab_file != 'none':
             self.bert_tokenizer = BertTokenizer(
                 args.bpe_vocab_file,
                 do_lower_case=not args.bpe_cased
@@ -37,7 +37,7 @@ class BertBPE(object):
         else:
             vocab_file_name = 'bert-base-cased' if args.bpe_cased else 'bert-base-uncased'
             self.bert_tokenizer = BertTokenizer.from_pretrained(vocab_file_name)
-            self.clean_up_tokenization = clean_up_tokenization
+        self.clean_up_tokenization = clean_up_tokenization
 
     def encode(self, x: str) -> str:
         return ' '.join(self.bert_tokenizer.tokenize(x))
